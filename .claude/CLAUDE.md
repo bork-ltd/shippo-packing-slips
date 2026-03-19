@@ -30,3 +30,9 @@ See [settings.json](settings.json) for the current list of approved commands.
 - **settings.local.json** - Machine-specific settings (ignored by global gitignore, never committed)
 
 Local settings override shared settings, allowing individual users to customize their experience while maintaining common defaults.
+
+## MCP Configuration
+
+- `.mcp.json` (repo root) — project-scoped MCP servers, committed to the repository and shared with all collaborators including cloud environments
+  - Currently configures the GitHub remote MCP via `https://api.githubcopilot.com/mcp`
+  - Requires a `GITHUB_PAT` environment variable with the following scopes: `repo`, `read:org`, `read:packages`, `notifications`, `security_events`, `gist`, `project`
