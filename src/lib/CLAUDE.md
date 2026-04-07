@@ -1,17 +1,13 @@
 # src/lib
 
-Library modules used by `src/index.ts`.
+Pure, deterministic functions with no I/O or side effects. All files in this directory are subject to 100% test coverage enforcement via `vitest.config.ts`.
 
 ## Modules
 
-- `pdf-generator.ts` — `generatePackingSlip(order, outputPath)` — writes a PDFKit packing slip to a temp path
-- `printer.ts` — `printPDF(filePath)` — submits a PDF to CUPS via `lp`; requires `CUPS_PRINTER_NAME` env var
-- `shippo.ts` — `fetchOrders()`, `fetchTransactions()`, `fetchPickupDetails()`, `schedulePickup()` — Shippo API calls; requires `SHIPPO_API_TOKEN` env var. See JSDoc in `shippo.ts` for function-level details.
+- `filter-transaction.ts` — `filterTransaction(tx, startDate, endDate)` — returns `'match' | 'skip' | 'stop'` for a transaction against a date window
+- `time-window.ts` — `calculateTimeWindow(now, timeWindowMinutes)` — computes the aligned UTC lookback window
+- `validate-pickup-config.ts` — `validatePickupConfig(rawLocationType, instructions)` — validates pickup scheduling env vars
 
-## Printer notes
+## Adding new modules
 
-- `lp` must be installed on the system (`apt install cups` on the Pi)
-- `lp` submits to the CUPS queue and returns before the document physically prints
-- `CUPS_PRINTER_NAME` is validated at startup in `src/index.ts` (exit 2) and again inside `printPDF`
-- Run `lpstat -p` to list available printer names; `lpstat -o` to see queued jobs
-- To tune print flags for the Knaon 4x6 format, add args to the `lp` array in `printer.ts`
+Any new file added here must be pure (no network, no filesystem, no process.env reads, no side effects) and must have a co-located `.test.ts` file with 100% coverage. I/O-bound code belongs in `src/services/` instead.

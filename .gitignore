@@ -34,4 +34,5 @@ packing-slip-*.pdf
 output/
 
 # Reports
+coverage/
 reports/

@@ -10,13 +10,7 @@
 
 **typecheck.yml** — Runs `yarn typecheck` (`tsc --noEmit`) on PRs targeting `main`. Enforces TypeScript type correctness.
 
-### Disabled Workflows
-
-**auto-merge.disabled** (in `.github/workflows/`)
-
-- Originally enabled auto-merge on all PRs with squash strategy
-- Disabled by changing extension from `.yml` to `.disabled`
-- Can be re-enabled by renaming back to `auto-merge.yml`
+**unit-tests.yml** — Runs `yarn test` (Vitest) on PRs targeting `main`. Enforces that all unit tests pass and that `src/lib/**` maintains 100% coverage.
 
 ## Composite Actions
 
