@@ -12,14 +12,6 @@
 
 **unit-tests.yml** — Runs `yarn test` (Vitest) on PRs targeting `main`. Enforces that all unit tests pass and that `src/lib/**` maintains 100% coverage.
 
-### Disabled Workflows
-
-**auto-merge.disabled** (in `.github/workflows/`)
-
-- Originally enabled auto-merge on all PRs with squash strategy
-- Disabled by changing extension from `.yml` to `.disabled`
-- Can be re-enabled by renaming back to `auto-merge.yml`
-
 ## Composite Actions
 
 ### `.github/actions/setup`
