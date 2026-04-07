@@ -151,9 +151,6 @@ export async function teardownTestTransaction(
 
   try {
     await client.refunds.create({ transaction: transactionId });
-    console.log(
-      `[teardownTestTransaction] Voided transaction ${transactionId}.`,
-    );
   } catch (error) {
     // Best-effort cleanup — do not fail the test suite, but warn so the failure
     // is visible and the transaction can be manually voided if needed.
