@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  biome:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
