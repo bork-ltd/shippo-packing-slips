@@ -5,9 +5,6 @@
 
 Raspberry Pi scripts to print packing slips, shipping labels, and schedule USPS pickups at regular intervals using the Shippo API
 
-See `ARCHITECTURE.md` for full system design.
-
-
 ## Requirements
 
 - Node.js 24
@@ -49,4 +46,4 @@ Values in `.env.local` override `.env`.
 
 ## Deployment
 
-See `ARCHITECTURE.md` for the full deployment model, provisioning instructions, and cron setup.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full deployment model, provisioning instructions, and cron setup.
