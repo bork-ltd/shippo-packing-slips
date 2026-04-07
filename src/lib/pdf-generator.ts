@@ -112,7 +112,7 @@ export async function generatePackingSlip(
  * @param singleLineHeight - Height of a single line of text
  * @returns Total height needed including padding
  */
-function calculateItemHeight(
+export function calculateItemHeight(
   item: NonNullable<Order['lineItems']>[number],
   singleLineHeight: number,
 ): number {

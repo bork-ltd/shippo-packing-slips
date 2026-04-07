@@ -1,10 +1,7 @@
 import { access, constants, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import dotenv from 'dotenv';
-import {
-  BuildingLocationType,
-  OrderStatusEnum,
-} from 'shippo/models/components';
+import { OrderStatusEnum } from 'shippo/models/components';
 
 import { generatePackingSlip } from './lib/pdf-generator';
 import { printPDF } from './lib/printer';
@@ -14,6 +11,8 @@ import {
   fetchTransactions,
   schedulePickup,
 } from './lib/shippo';
+import { calculateTimeWindow } from './lib/time-window';
+import { validatePickupConfig } from './lib/validate-pickup-config';
 
 // Load environment variables (.env.local overrides .env)
 dotenv.config();
@@ -283,26 +282,15 @@ async function runPickupJob(transactionIds: string[]): Promise<{
     return { scheduled: false };
   }
 
-  const rawLocationType = process.env.PICKUP_BUILDING_LOCATION_TYPE;
-  const validLocationTypes = Object.values(BuildingLocationType) as string[];
-  if (rawLocationType && !validLocationTypes.includes(rawLocationType)) {
-    const msg = `Invalid PICKUP_BUILDING_LOCATION_TYPE: "${rawLocationType}". Valid values: ${validLocationTypes.join(', ')}`;
-    console.error(`✗ ${msg}`);
-    return { scheduled: false, error: msg };
+  const configResult = validatePickupConfig(
+    process.env.PICKUP_BUILDING_LOCATION_TYPE,
+    process.env.PICKUP_INSTRUCTIONS,
+  );
+  if (!configResult.valid) {
+    console.error(`✗ ${configResult.error}`);
+    return { scheduled: false, error: configResult.error };
   }
-  const buildingLocationType =
-    (rawLocationType as BuildingLocationType) ?? BuildingLocationType.FrontDoor;
-
-  if (
-    buildingLocationType === BuildingLocationType.Other &&
-    !process.env.PICKUP_INSTRUCTIONS
-  ) {
-    return {
-      scheduled: false,
-      error:
-        'PICKUP_INSTRUCTIONS is required when PICKUP_BUILDING_LOCATION_TYPE is "Other"',
-    };
-  }
+  const { buildingLocationType } = configResult;
 
   try {
     // All transactions in a run share the same carrier account and from_address.
@@ -373,24 +361,17 @@ async function run() {
     process.env.CRON_TIME_WINDOW_MINUTES ?? '60',
     10,
   );
-  if (Number.isNaN(timeWindowMinutes) || timeWindowMinutes <= 0) {
-    console.error(
-      `Error: CRON_TIME_WINDOW_MINUTES must be a positive integer, got: ${process.env.CRON_TIME_WINDOW_MINUTES}`,
-    );
+  let startDate: Date;
+  let endDate: Date;
+  try {
+    ({ startDate, endDate } = calculateTimeWindow(
+      new Date(),
+      timeWindowMinutes,
+    ));
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : err}`);
     process.exit(2);
   }
-  if (1440 % timeWindowMinutes !== 0) {
-    console.error(
-      `Error: CRON_TIME_WINDOW_MINUTES must evenly divide 1440 (minutes in a day), got: ${timeWindowMinutes}`,
-    );
-    process.exit(2);
-  }
-  const now = new Date();
-  const msPerWindow = timeWindowMinutes * 60 * 1000;
-  const endDate = new Date(
-    Math.floor(now.getTime() / msPerWindow) * msPerWindow,
-  );
-  const startDate = new Date(endDate.getTime() - 2 * msPerWindow); // 2x window (lookback for both jobs)
 
   console.log('Date range (2x lookback window):');
   console.log('  Start:', startDate.toISOString());

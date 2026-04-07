@@ -9,6 +9,8 @@ import type {
 } from 'shippo/models/components';
 import { TransactionStatusEnum } from 'shippo/models/components';
 
+import { filterTransaction } from './filter-transaction';
+
 export type { Pickup, PickupBase };
 
 export type PickupDetails = {
@@ -117,23 +119,15 @@ export async function fetchTransactions(
       const pageResults = response.results ?? [];
 
       for (const tx of pageResults) {
-        const created = tx.objectCreated;
-
-        // Results are newest-first; stop paging once we're before the window
-        if (created && created < startDate) {
+        const result = filterTransaction(tx, startDate, endDate);
+        if (result === 'stop') {
           console.log(
-            `  Stopping pagination: reached transaction before window (${created.toISOString()})`,
+            `  Stopping pagination: reached transaction before window (${tx.objectCreated?.toISOString()})`,
           );
           hasMore = false;
           break;
         }
-
-        if (
-          created &&
-          created >= startDate &&
-          created <= endDate &&
-          tx.labelUrl
-        ) {
+        if (result === 'match') {
           matched.push(tx);
         }
       }
