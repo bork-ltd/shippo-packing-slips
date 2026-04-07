@@ -3,7 +3,7 @@
 [![Biome](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/biome.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/biome.yml)
 [![Typecheck](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/typecheck.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/typecheck.yml)
 
-Automated packing slip and shipping label printer for Shippo orders. Runs on a Raspberry Pi Zero 2 W on a cron schedule, fetches recent activity from the Shippo API, and prints to a Knaon thermal printer via CUPS.
+Raspberry Pi scripts to print packing slips, shipping labels, and schedule USPS pickups at regular intervals using the Shippo API
 
 See `ARCHITECTURE.md` for full system design.
 
@@ -18,8 +18,8 @@ See `ARCHITECTURE.md` for full system design.
 
 ```bash
 yarn install
-cp .env.example .env.local        # add your SHIPPO_API_TOKEN
-yarn generate                      # fetch orders and generate PDFs
+cp .env.example .env.local  # add your SHIPPO_API_TOKEN
+yarn generate               # fetch orders and generate PDFs
 ```
 
 ### Environment Variables
@@ -34,6 +34,8 @@ yarn generate                      # fetch orders and generate PDFs
 | `COMPANY_ADDRESS_LINE_2` | No | | Second address line |
 | `COMPANY_ADDRESS_LINE_3` | No | | Third address line |
 | `COMPANY_LOGO_PATH` | No | | Absolute path to logo image |
+| `PICKUP_BUILDING_LOCATION_TYPE` | No | `Front Door` | Where parcels will be available for pickup (see `.env.example` for valid values) |
+| `PICKUP_INSTRUCTIONS` | No | | Courier instructions; required when `PICKUP_BUILDING_LOCATION_TYPE` is `Other` |
 | `INCLUDE_ALL_ORDER_STATUSES` | No | `false` | Set to `true` to fetch all order statuses instead of only `PAID` |
 
 Values in `.env.local` override `.env`.

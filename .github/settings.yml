@@ -2,6 +2,6 @@ _extends: brianespinosa/settings:base.yml
 
 repository:
   name: shippo-packing-slips
-  description: Raspberry Pi Zero scripts to generate custom packing slips and print them and any new shipping labels at regular intervals using Shippo API
-  topics: raspberry-pi-zero-2-w, shippo
+  description: Raspberry Pi scripts to print packing slips, shipping labels, and schedule USPS pickups at regular intervals using the Shippo API
+  topics: raspberry-pi-zero-2-w,shippo
   private: false

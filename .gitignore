@@ -32,3 +32,6 @@ build/
 test-packing-slip.pdf
 packing-slip-*.pdf
 output/
+
+# Reports
+reports/

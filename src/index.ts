@@ -1,11 +1,19 @@
 import { access, constants, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import dotenv from 'dotenv';
-import { OrderStatusEnum } from 'shippo/models/components';
+import {
+  BuildingLocationType,
+  OrderStatusEnum,
+} from 'shippo/models/components';
 
 import { generatePackingSlip } from './lib/pdf-generator';
 import { printPDF } from './lib/printer';
-import { fetchOrders, fetchTransactions } from './lib/shippo';
+import {
+  fetchOrders,
+  fetchPickupDetails,
+  fetchTransactions,
+  schedulePickup,
+} from './lib/shippo';
 
 // Load environment variables (.env.local overrides .env)
 dotenv.config();
@@ -134,7 +142,12 @@ async function runPackingSlipsJob(
 async function runLabelsJob(
   startDate: Date,
   endDate: Date,
-): Promise<{ success: number; errors: number; skipped: number }> {
+): Promise<{
+  success: number;
+  errors: number;
+  skipped: number;
+  printedTransactionIds: string[];
+}> {
   console.log('Fetching transactions and downloading labels...');
 
   try {
@@ -142,7 +155,7 @@ async function runLabelsJob(
 
     if (transactions.length === 0) {
       console.log('No labels found in the specified date range.\n');
-      return { success: 0, errors: 0, skipped: 0 };
+      return { success: 0, errors: 0, skipped: 0, printedTransactionIds: [] };
     }
 
     console.log(`✓ Found ${transactions.length} label(s)\n`);
@@ -150,6 +163,7 @@ async function runLabelsJob(
     let successCount = 0;
     let errorCount = 0;
     let skippedCount = 0;
+    const printedTransactionIds: string[] = [];
 
     for (const tx of transactions) {
       const objectId = (tx.objectId || 'unknown').replace(
@@ -223,6 +237,9 @@ async function runLabelsJob(
         // Leave file on disk as deduplication sentinel for the lookback window
         console.log('');
         successCount++;
+        if (tx.objectId) {
+          printedTransactionIds.push(tx.objectId);
+        }
       } catch (error) {
         // A partial or empty file may have been written to outputPath before
         // the error was thrown. It will be cleaned up by the OS eventually
@@ -238,7 +255,12 @@ async function runLabelsJob(
       }
     }
 
-    return { success: successCount, errors: errorCount, skipped: skippedCount };
+    return {
+      success: successCount,
+      errors: errorCount,
+      skipped: skippedCount,
+      printedTransactionIds,
+    };
   } catch (error) {
     console.error('✗ Failed to fetch or process labels\n');
     if (error instanceof Error) {
@@ -246,7 +268,74 @@ async function runLabelsJob(
     } else {
       console.error('Error:', error);
     }
-    return { success: 0, errors: 1, skipped: 0 };
+    return { success: 0, errors: 1, skipped: 0, printedTransactionIds: [] };
+  }
+}
+
+async function runPickupJob(transactionIds: string[]): Promise<{
+  scheduled: boolean;
+  confirmationCode?: string;
+  error?: string;
+}> {
+  if (transactionIds.length === 0) {
+    return { scheduled: false };
+  }
+
+  const rawLocationType = process.env.PICKUP_BUILDING_LOCATION_TYPE;
+  const validLocationTypes = Object.values(BuildingLocationType) as string[];
+  if (rawLocationType && !validLocationTypes.includes(rawLocationType)) {
+    const msg = `Invalid PICKUP_BUILDING_LOCATION_TYPE: "${rawLocationType}". Valid values: ${validLocationTypes.join(', ')}`;
+    console.error(`✗ ${msg}`);
+    return { scheduled: false, error: msg };
+  }
+  const buildingLocationType =
+    (rawLocationType as BuildingLocationType) ?? BuildingLocationType.FrontDoor;
+
+  if (
+    buildingLocationType === BuildingLocationType.Other &&
+    !process.env.PICKUP_INSTRUCTIONS
+  ) {
+    return {
+      scheduled: false,
+      error:
+        'PICKUP_INSTRUCTIONS is required when PICKUP_BUILDING_LOCATION_TYPE is "Other"',
+    };
+  }
+
+  try {
+    // All transactions in a run share the same carrier account and from_address.
+    // Resolve both from the first transaction; all IDs are passed to the single pickup request.
+    const { carrierAccount, address } = await fetchPickupDetails(
+      transactionIds[0],
+    );
+
+    // Window: tomorrow 08:00 UTC through D+4 18:00 UTC.
+    // Covers the next guaranteed business day even across a 3-day weekend with a holiday.
+    const now = new Date();
+    const startTime = new Date(now);
+    startTime.setUTCDate(startTime.getUTCDate() + 1);
+    startTime.setUTCHours(8, 0, 0, 0);
+    const endTime = new Date(now);
+    endTime.setUTCDate(endTime.getUTCDate() + 4);
+    endTime.setUTCHours(18, 0, 0, 0);
+
+    const pickup = await schedulePickup({
+      carrierAccount,
+      transactions: transactionIds,
+      requestedStartTime: startTime,
+      requestedEndTime: endTime,
+      location: {
+        buildingLocationType,
+        instructions: process.env.PICKUP_INSTRUCTIONS,
+        address,
+      },
+    });
+
+    return { scheduled: true, confirmationCode: pickup.confirmationCode };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`✗ Pickup scheduling failed: ${message}`);
+    return { scheduled: false, error: message };
   }
 }
 
@@ -303,8 +392,20 @@ async function run() {
 
   const slipResults = await runPackingSlipsJob(startDate, endDate);
   const labelResults = await runLabelsJob(startDate, endDate);
+  const pickupResult = await runPickupJob(labelResults.printedTransactionIds);
 
   const combinedErrors = slipResults.errors + labelResults.errors;
+
+  let pickupSummary: string;
+  if (labelResults.printedTransactionIds.length === 0) {
+    pickupSummary = 'not scheduled (no new labels this run)';
+  } else if (pickupResult.scheduled) {
+    pickupSummary = pickupResult.confirmationCode
+      ? `scheduled (confirmation: ${pickupResult.confirmationCode})`
+      : 'scheduled (no confirmation code returned)';
+  } else {
+    pickupSummary = `FAILED — ${pickupResult.error}`;
+  }
 
   console.log('='.repeat(50));
   console.log('Summary:');
@@ -314,6 +415,7 @@ async function run() {
   console.log(
     `  Labels:        ${labelResults.success} downloaded, ${labelResults.skipped} skipped (lookback), ${labelResults.errors} errors`,
   );
+  console.log(`  Pickup:        ${pickupSummary}`);
   console.log('='.repeat(50));
 
   process.exit(combinedErrors > 0 ? 1 : 0);
