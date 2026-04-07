@@ -14,6 +14,7 @@ describe('calculateTimeWindow', () => {
       const now = new Date('2026-01-01T10:45:00.000Z');
       const { startDate, endDate } = calculateTimeWindow(now, 60);
       expect(endDate.getTime() - startDate.getTime()).toBe(2 * 60 * 60 * 1000);
+      expect(startDate.toISOString()).toBe('2026-01-01T08:00:00.000Z');
     });
 
     it('works for a 30-minute window', () => {
@@ -51,6 +52,10 @@ describe('calculateTimeWindow', () => {
   describe('invalid input', () => {
     it('throws RangeError for NaN', () => {
       expect(() => calculateTimeWindow(new Date(), NaN)).toThrow(RangeError);
+    });
+
+    it('throws RangeError for a float (1.5) even though 1440 % 1.5 === 0', () => {
+      expect(() => calculateTimeWindow(new Date(), 1.5)).toThrow(RangeError);
     });
 
     it('throws RangeError for 0', () => {

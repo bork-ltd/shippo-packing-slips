@@ -60,11 +60,21 @@ describe('filterTransaction', () => {
       expect(filterTransaction(tx, startDate, endDate)).toBe('skip');
     });
 
+    it('returns skip when created is endDate plus 1ms', () => {
+      const tx = makeTx(new Date(endDate.getTime() + 1), 'http://label.url');
+      expect(filterTransaction(tx, startDate, endDate)).toBe('skip');
+    });
+
     it('returns skip when created is after endDate', () => {
       const tx = makeTx(
         new Date('2026-01-01T12:00:00.000Z'),
         'http://label.url',
       );
+      expect(filterTransaction(tx, startDate, endDate)).toBe('skip');
+    });
+
+    it('returns skip when created equals startDate but labelUrl is undefined', () => {
+      const tx = makeTx(new Date(startDate), undefined);
       expect(filterTransaction(tx, startDate, endDate)).toBe('skip');
     });
 

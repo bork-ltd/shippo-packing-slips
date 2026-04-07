@@ -4,7 +4,11 @@ export function calculateTimeWindow(
   now: Date,
   timeWindowMinutes: number,
 ): TimeWindow {
-  if (Number.isNaN(timeWindowMinutes) || timeWindowMinutes <= 0) {
+  if (
+    Number.isNaN(timeWindowMinutes) ||
+    timeWindowMinutes <= 0 ||
+    !Number.isInteger(timeWindowMinutes)
+  ) {
     throw new RangeError(
       `timeWindowMinutes must be a positive integer, got: ${timeWindowMinutes}`,
     );

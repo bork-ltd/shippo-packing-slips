@@ -45,7 +45,7 @@ const TABLE_HEADER_LINE_WIDTH = 2;
 const TABLE_SEPARATOR_LINE_WIDTH = 0.5;
 const TABLE_QTY_COLUMN_WIDTH = 30;
 const TABLE_COLUMN_GAP = 10; // Gap between items and quantity columns
-const TABLE_ROW_PADDING = 6; // Vertical padding top and bottom of each row
+export const TABLE_ROW_PADDING = 6; // Vertical padding top and bottom of each row
 
 /**
  * Generate a packing slip PDF for a given order

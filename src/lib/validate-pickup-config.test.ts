@@ -87,5 +87,11 @@ describe('validatePickupConfig', () => {
       const result = validatePickupConfig('Other', 'Inside porch box');
       expect(result.valid).toBe(true);
     });
+
+    it('returns valid when type is Other and instructions is whitespace-only', () => {
+      // Whitespace is truthy — callers are responsible for meaningful content
+      const result = validatePickupConfig('Other', '   ');
+      expect(result.valid).toBe(true);
+    });
   });
 });
