@@ -121,9 +121,6 @@ export async function fetchTransactions(
       for (const tx of pageResults) {
         const result = filterTransaction(tx, startDate, endDate);
         if (result === 'stop') {
-          console.log(
-            `  Stopping pagination: reached transaction before window (${tx.objectCreated?.toISOString()})`,
-          );
           hasMore = false;
           break;
         }

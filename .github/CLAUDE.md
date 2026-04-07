@@ -12,6 +12,8 @@
 
 **unit-tests.yml** — Runs `yarn test` (Vitest) on PRs targeting `main`. Enforces that all unit tests pass and that `src/lib/**` maintains 100% coverage.
 
+**integration-tests.yml** — Runs `yarn test:integration` (Vitest) on PRs targeting `main`, on a weekly Monday cron, and on manual dispatch. Calls the real Shippo test-mode API via `SHIPPO_TEST_API_TOKEN` secret. Uses `github.ref` in the concurrency group (rather than `pull_request.number`) because the workflow has three triggers and `pull_request.number` is empty for schedule/dispatch runs.
+
 ## Composite Actions
 
 ### `.github/actions/setup`
