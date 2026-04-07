@@ -45,10 +45,10 @@ export async function setupTestTransaction(): Promise<{
       },
       addressTo: {
         name: 'Test Recipient',
-        street1: '456 Oak Ave',
+        street1: '215 Water St',
         city: 'New York',
         state: 'NY',
-        zip: '10001',
+        zip: '10038',
         country: 'US',
       },
       parcels: [
