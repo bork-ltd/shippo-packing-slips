@@ -34,6 +34,8 @@ yarn generate                      # fetch orders and generate PDFs
 | `COMPANY_ADDRESS_LINE_2` | No | | Second address line |
 | `COMPANY_ADDRESS_LINE_3` | No | | Third address line |
 | `COMPANY_LOGO_PATH` | No | | Absolute path to logo image |
+| `PICKUP_BUILDING_LOCATION_TYPE` | No | `Front Door` | Where parcels will be available for pickup (see `.env.example` for valid values) |
+| `PICKUP_INSTRUCTIONS` | No | | Courier instructions; required when `PICKUP_BUILDING_LOCATION_TYPE` is `Other` |
 | `INCLUDE_ALL_ORDER_STATUSES` | No | `false` | Set to `true` to fetch all order statuses instead of only `PAID` |
 
 Values in `.env.local` override `.env`.
