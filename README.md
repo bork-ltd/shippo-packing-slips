@@ -46,4 +46,4 @@ Values in `.env.local` override `.env`.
 
 ## Deployment
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full deployment model, provisioning instructions, and cron setup.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full deployment model, provisioning instructions, and cron setup.
