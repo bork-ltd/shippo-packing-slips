@@ -275,6 +275,8 @@ async function runLabelsJob(
 async function runPickupJob(transactionIds: string[]): Promise<{
   scheduled: boolean;
   confirmationCode?: string;
+  confirmedStartTime?: string;
+  confirmedEndTime?: string;
   error?: string;
 }> {
   if (transactionIds.length === 0) {
@@ -331,7 +333,12 @@ async function runPickupJob(transactionIds: string[]): Promise<{
       },
     });
 
-    return { scheduled: true, confirmationCode: pickup.confirmationCode };
+    return {
+      scheduled: true,
+      confirmationCode: pickup.confirmationCode,
+      confirmedStartTime: pickup.confirmedStartTime,
+      confirmedEndTime: pickup.confirmedEndTime,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`✗ Pickup scheduling failed: ${message}`);
@@ -400,9 +407,14 @@ async function run() {
   if (labelResults.printedTransactionIds.length === 0) {
     pickupSummary = 'not scheduled (no new labels this run)';
   } else if (pickupResult.scheduled) {
-    pickupSummary = pickupResult.confirmationCode
-      ? `scheduled (confirmation: ${pickupResult.confirmationCode})`
-      : 'scheduled (no confirmation code returned)';
+    const confirmation = pickupResult.confirmationCode
+      ? ` (confirmation: ${pickupResult.confirmationCode})`
+      : '';
+    const window =
+      pickupResult.confirmedStartTime && pickupResult.confirmedEndTime
+        ? ` — ${pickupResult.confirmedStartTime} to ${pickupResult.confirmedEndTime}`
+        : '';
+    pickupSummary = `scheduled${confirmation}${window}`;
   } else {
     pickupSummary = `FAILED — ${pickupResult.error}`;
   }
