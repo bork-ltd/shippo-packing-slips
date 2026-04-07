@@ -18,8 +18,8 @@ See `ARCHITECTURE.md` for full system design.
 
 ```bash
 yarn install
-cp .env.example .env.local        # add your SHIPPO_API_TOKEN
-yarn generate                      # fetch orders and generate PDFs
+cp .env.example .env.local  # add your SHIPPO_API_TOKEN
+yarn generate               # fetch orders and generate PDFs
 ```
 
 ### Environment Variables
