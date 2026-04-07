@@ -2,17 +2,16 @@ import { access, constants, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { OrderStatusEnum } from 'shippo/models/components';
-
-import { generatePackingSlip } from './lib/pdf-generator';
-import { printPDF } from './lib/printer';
+import { calculateTimeWindow } from './lib/time-window';
+import { validatePickupConfig } from './lib/validate-pickup-config';
+import { generatePackingSlip } from './services/pdf-generator';
+import { printPDF } from './services/printer';
 import {
   fetchOrders,
   fetchPickupDetails,
   fetchTransactions,
   schedulePickup,
-} from './lib/shippo';
-import { calculateTimeWindow } from './lib/time-window';
-import { validatePickupConfig } from './lib/validate-pickup-config';
+} from './services/shippo';
 
 // Load environment variables (.env.local overrides .env)
 dotenv.config();

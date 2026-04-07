@@ -9,7 +9,7 @@ import type {
 } from 'shippo/models/components';
 import { TransactionStatusEnum } from 'shippo/models/components';
 
-import { filterTransaction } from './filter-transaction';
+import { filterTransaction } from '../lib/filter-transaction';
 
 export type { Pickup, PickupBase };
 
