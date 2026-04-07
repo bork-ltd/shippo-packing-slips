@@ -3,6 +3,7 @@
 [![Biome](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/biome.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/biome.yml)
 [![Typecheck](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/typecheck.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/typecheck.yml)
 [![Unit Tests](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/unit-tests.yml)
+[![Integration Tests](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/integration-tests.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/integration-tests.yml)
 
 Raspberry Pi scripts to print packing slips, shipping labels, and schedule USPS pickups at regular intervals using the Shippo API
 
