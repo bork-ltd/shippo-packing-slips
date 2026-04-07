@@ -1,5 +1,9 @@
 import type { Shippo } from 'shippo';
-import { DistanceUnitEnum, WeightUnitEnum } from 'shippo/models/components';
+import {
+  DistanceUnitEnum,
+  TransactionStatusEnum,
+  WeightUnitEnum,
+} from 'shippo/models/components';
 
 import { createShippoClient } from '../services/shippo';
 
@@ -67,6 +71,13 @@ export async function setupTestTransaction(): Promise<{
     throw new Error('Transaction was created but has no objectId');
   }
 
+  if (transaction.status !== TransactionStatusEnum.Success) {
+    throw new Error(
+      `Transaction ${transaction.objectId} is in ${transaction.status} state — ` +
+        `expected SUCCESS. Label generation failed in Shippo test mode.`,
+    );
+  }
+
   return { client, transactionId: transaction.objectId };
 }
 
@@ -74,6 +85,20 @@ export async function teardownTestTransaction(
   client: Shippo,
   transactionId: string,
 ): Promise<void> {
+  // Only SUCCESS transactions can be refunded — ERROR/VOIDED/etc. have no label to void.
+  let status: string | undefined;
+  try {
+    const tx = await client.transactions.get(transactionId);
+    status = tx.status;
+  } catch {
+    // If we can't fetch the transaction, skip cleanup silently.
+    return;
+  }
+
+  if (status !== TransactionStatusEnum.Success) {
+    return;
+  }
+
   try {
     await client.refunds.create({ transaction: transactionId });
   } catch (error) {
