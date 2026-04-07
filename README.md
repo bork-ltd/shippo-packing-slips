@@ -3,7 +3,7 @@
 [![Biome](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/biome.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/biome.yml)
 [![Typecheck](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/typecheck.yml/badge.svg)](https://github.com/brianespinosa/shippo-packing-slips/actions/workflows/typecheck.yml)
 
-Runs on a Raspberry Pi Zero 2 W on a cron schedule to print packing slips, shipping labels, and schedule USPS pickups at regular intervals using the Shippo API. Prints to a Knaon thermal printer via CUPS.
+Raspberry Pi Zero scripts to print packing slips, shipping labels, and schedule USPS pickups at regular intervals using the Shippo API
 
 See `ARCHITECTURE.md` for full system design.
 
