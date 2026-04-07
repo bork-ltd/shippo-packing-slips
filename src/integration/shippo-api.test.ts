@@ -18,7 +18,7 @@ beforeAll(async () => {
     );
   }
   testSetup = await setupTestTransaction();
-}, 30_000);
+}, 60_000);
 
 afterAll(async () => {
   if (testSetup) {

@@ -90,7 +90,38 @@ export async function setupTestTransaction(): Promise<{
     throw new Error('Transaction was created but has no objectId');
   }
 
+  await waitForTransactionSuccess(client, transaction.objectId);
+
   return { client, transactionId: transaction.objectId };
+}
+
+async function waitForTransactionSuccess(
+  client: Shippo,
+  transactionId: string,
+  timeoutMs = 20_000,
+  intervalMs = 1_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const tx = await client.transactions.get(transactionId);
+
+    if (tx.status === TransactionStatusEnum.Success) {
+      return;
+    }
+
+    if (tx.status === TransactionStatusEnum.Error) {
+      throw new Error(
+        `Transaction ${transactionId} reached ERROR state — label generation failed in Shippo test mode.`,
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(
+    `Transaction ${transactionId} did not reach SUCCESS within ${timeoutMs}ms.`,
+  );
 }
 
 export async function teardownTestTransaction(
