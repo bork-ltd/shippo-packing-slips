@@ -43,6 +43,7 @@ export async function setupTestTransaction(): Promise<{
         zip: '94103',
         country: 'US',
         email: 'test@example.com',
+        phone: '4155550100',
       },
       addressTo: {
         name: 'Test Recipient',
