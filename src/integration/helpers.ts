@@ -111,8 +111,13 @@ async function waitForTransactionSuccess(
     }
 
     if (tx.status === TransactionStatusEnum.Error) {
+      const messages = (tx.messages ?? [])
+        .map((m) => m.text)
+        .filter(Boolean)
+        .join('; ');
       throw new Error(
-        `Transaction ${transactionId} reached ERROR state — label generation failed in Shippo test mode.`,
+        `Transaction ${transactionId} reached ERROR state.` +
+          (messages ? ` Shippo messages: ${messages}` : ''),
       );
     }
 
