@@ -6,10 +6,11 @@ A single Node.js script that runs on a schedule via cron on a Raspberry Pi Zero 
 
 ## What It Does
 
-Each cron run performs two jobs over a **2x lookback window** (default: last 2 × 60 minutes):
+Each cron run performs three jobs over a **2x lookback window** (default: last 2 × 60 minutes):
 
 1. **Packing slips** — Fetch PAID orders from Shippo → check sentinel *(skip + delete if found)* → generate PDF → print via `lp` → leave file on disk as sentinel
 2. **Shipping labels** — Fetch shipments with Shippo labels → check sentinel *(skip + delete if found)* → download label PDF → print via `lp` → leave file on disk as sentinel
+3. **USPS pickup scheduling** — If any new labels were printed this run, resolve the pickup address and carrier account from Shippo and schedule a single pickup for all of them, with a window from tomorrow 08:00 UTC through D+4 18:00 UTC — wide enough to guarantee the next business day falls within it even across a 3-day holiday weekend
 
 Temp files are written to `/tmp`. Files from the prior window are cleaned up when encountered as already-printed sentinels on the current run.
 
@@ -53,11 +54,11 @@ Under normal operation, this ensures every item in the trailing window gets a se
 
 ```
 src/
-  index.ts           ← single entry point, orchestrates both jobs
+  index.ts           ← single entry point, orchestrates all three jobs
   lib/
     pdf-generator.ts ← generatePackingSlip()
     printer.ts       ← printPDF() via CUPS lp command
-    shippo.ts        ← fetchOrders(), fetchTransactions()
+    shippo.ts        ← fetchOrders(), fetchTransactions(), fetchPickupDetails(), schedulePickup()
 ```
 
 

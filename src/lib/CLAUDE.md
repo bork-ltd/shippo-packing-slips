@@ -6,7 +6,7 @@ Library modules used by `src/index.ts`.
 
 - `pdf-generator.ts` — `generatePackingSlip(order, outputPath)` — writes a PDFKit packing slip to a temp path
 - `printer.ts` — `printPDF(filePath)` — submits a PDF to CUPS via `lp`; requires `CUPS_PRINTER_NAME` env var
-- `shippo.ts` — `fetchOrders()`, `fetchTransactions()` — Shippo API calls; requires `SHIPPO_API_TOKEN` env var
+- `shippo.ts` — `fetchOrders()`, `fetchTransactions()`, `fetchPickupDetails()`, `schedulePickup()` — Shippo API calls; requires `SHIPPO_API_TOKEN` env var. See JSDoc in `shippo.ts` for function-level details.
 
 ## Printer notes
 

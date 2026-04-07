@@ -1,10 +1,20 @@
 import { Shippo } from 'shippo';
 import type {
+  AddressCompleteCreateRequest,
   Order,
   OrderStatusEnum,
+  Pickup,
+  PickupBase,
   Transaction,
 } from 'shippo/models/components';
 import { TransactionStatusEnum } from 'shippo/models/components';
+
+export type { Pickup, PickupBase };
+
+export type PickupDetails = {
+  carrierAccount: string;
+  address: AddressCompleteCreateRequest;
+};
 
 /**
  * Initialize Shippo client with API token from environment
@@ -142,5 +152,85 @@ export async function fetchTransactions(
       );
     }
     throw new Error('Failed to fetch transactions from Shippo: Unknown error');
+  }
+}
+
+/**
+ * Resolve pickup details (carrier account + sender address) for a given transaction.
+ * Walks the chain: transaction → rate → shipment → address_from.
+ * @param transactionId - The Shippo transaction object ID
+ * @returns Carrier account ID and the sender address for use in a pickup request
+ */
+export async function fetchPickupDetails(
+  transactionId: string,
+): Promise<PickupDetails> {
+  const client = createShippoClient();
+
+  try {
+    const transaction = await client.transactions.get(transactionId);
+    const transactionRate = transaction.rate;
+
+    if (!transactionRate) {
+      throw new Error('Transaction has no rate');
+    }
+
+    const rateId =
+      typeof transactionRate === 'string'
+        ? transactionRate
+        : transactionRate.objectId;
+
+    if (!rateId) {
+      throw new Error('Unable to resolve rate ID from transaction');
+    }
+
+    const rate = await client.rates.get(rateId);
+
+    if (!rate.carrierAccount) {
+      throw new Error('Rate has no carrier account');
+    }
+
+    const shipment = await client.shipments.get(rate.shipment);
+    const from = shipment.addressFrom;
+
+    return {
+      carrierAccount: rate.carrierAccount,
+      address: {
+        name: from.name ?? '',
+        company: from.company,
+        street1: from.street1 ?? '',
+        street2: from.street2,
+        street3: from.street3,
+        city: from.city ?? '',
+        state: from.state ?? '',
+        zip: from.zip ?? '',
+        country: from.country,
+        phone: from.phone,
+        email: from.email,
+      },
+    };
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to fetch pickup details: ${error.message}`);
+    }
+    throw new Error('Failed to fetch pickup details: Unknown error');
+  }
+}
+
+/**
+ * Schedule a carrier pickup for one or more existing transactions via the Shippo pickups API.
+ * The carrier is determined by the carrier account embedded in the request.
+ * @param request - PickupBase object containing carrier account, location, time window, and transaction IDs
+ * @returns Pickup object with status, confirmation code, and carrier-confirmed time windows
+ */
+export async function schedulePickup(request: PickupBase): Promise<Pickup> {
+  const client = createShippoClient();
+
+  try {
+    return await client.pickups.create(request);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to schedule pickup: ${error.message}`);
+    }
+    throw new Error('Failed to schedule pickup: Unknown error');
   }
 }
