@@ -85,13 +85,9 @@ Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`
 
 - Keep messages brief and easy to parse - avoid lengthy descriptions
 - Focus on specific, scannable details that help humans quickly identify what a commit contains
-- **NEVER** add "🤖 Generated with Claude Code" or similar footers to commit messages
-- **NEVER** add "Co-Authored-By: Claude" or any co-author footers to commits
 
 **Pull request requirements:**
 
-- **NEVER** add "Co-Authored-By: Claude" or any co-author attribution to PR descriptions
-- **NEVER** add "🤖 Generated with Claude Code" or similar attribution to PRs
 - Keep PR descriptions focused on technical changes, testing, and references
 
 ### File Operations and Repository Root
