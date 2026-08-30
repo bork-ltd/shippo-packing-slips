@@ -499,13 +499,19 @@ async function run() {
   console.log(`  Pickup:        ${pickupSummary}`);
   console.log('='.repeat(50));
 
+  // A pickup that should have been scheduled but wasn't is a run failure,
+  // matching the Slack FAILED notification above.
+  const pickupFailed =
+    labelResults.printedTransactionIds.length > 0 && !pickupResult.scheduled;
+  const runFailed = combinedErrors > 0 || pickupFailed;
+
   // Heartbeat only on a clean run — a failing run must NOT ping, so the
   // monitor's missed-ping alert also fires when every run is erroring.
-  if (combinedErrors === 0) {
+  if (!runFailed) {
     await sendHeartbeat();
   }
 
-  process.exit(combinedErrors > 0 ? 1 : 0);
+  process.exit(runFailed ? 1 : 0);
 }
 
 run().catch(async (error) => {

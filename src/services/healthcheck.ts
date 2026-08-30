@@ -1,4 +1,5 @@
-// Abort a heartbeat ping that stalls so it cannot delay process exit.
+// Abort a heartbeat ping that stalls so it delays process exit by at most
+// this long.
 const HEARTBEAT_TIMEOUT_MS = 10_000;
 
 /**
@@ -27,8 +28,14 @@ export async function sendHeartbeat(): Promise<void> {
       );
     }
   } catch (error) {
-    console.warn(
-      `Warning: heartbeat ping failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    // undici wraps network errors as "TypeError: fetch failed" with the real
+    // cause (ECONNREFUSED, ENOTFOUND, ...) in error.cause.
+    const detail =
+      error instanceof Error
+        ? error.cause instanceof Error
+          ? `${error.message} (${error.cause.message})`
+          : error.message
+        : String(error);
+    console.warn(`Warning: heartbeat ping failed: ${detail}`);
   }
 }
