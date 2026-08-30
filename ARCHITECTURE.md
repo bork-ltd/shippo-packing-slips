@@ -90,14 +90,33 @@ The cron schedule must match `CRON_TIME_WINDOW_MINUTES`. The script floors each 
 
 The command must `cd` to the home directory first so that `dotenv` finds `~/.env`. A `PATH` line is required because cron's default PATH (`/usr/bin:/bin`) does not include `/usr/local/bin` where the `node` symlink lives.
 
-Example for a 30-minute window (`CRON_TIME_WINDOW_MINUTES=30`):
+Example for a 5-minute window (`CRON_TIME_WINDOW_MINUTES=5`, the current production setting):
 
 ```
 PATH=/usr/local/bin:/usr/bin:/bin
-0,30 * * * * cd "$HOME" && node "$HOME/bundle/index.js" >> "$HOME/cron.log" 2>&1
+*/5 * * * * cd "$HOME" && node "$HOME/bundle/index.js" >> "$HOME/cron.log" 2>&1
 ```
 
 To install or edit: `crontab -e`. Output is appended to `~/cron.log`.
+
+#### Log rotation
+
+Nothing rotates `~/cron.log` by default — the system logrotate config only covers `/var/log`. Growth is slow (roughly 600 bytes per quiet run), but the file grows unbounded, so provisioning installs a logrotate drop-in keeping a rolling year of small compressed monthly archives:
+
+```bash
+sudo tee /etc/logrotate.d/shippo-cron > /dev/null <<'EOF'
+/home/bje/cron.log {
+  monthly
+  rotate 12
+  compress
+  missingok
+  notifempty
+  copytruncate
+}
+EOF
+```
+
+`copytruncate` is required: each cron run appends directly to the file and cannot be signaled to reopen a renamed log, so logrotate must copy then truncate in place.
 
 To update the bundle after a new release, run `update-shippo` (alias configured during provisioning — see below).
 
