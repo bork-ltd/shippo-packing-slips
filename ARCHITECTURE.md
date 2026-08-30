@@ -78,11 +78,13 @@ Inter font files (`Inter-Regular.ttf`, `Inter-Bold.ttf`) are **not** published i
 
 ### Pi Cron Job
 
-The Pi's system timezone must be set to UTC to avoid DST-related cron skips or double-fires:
+The Pi's system timezone must be UTC to avoid DST-related cron skips or double-fires. This is set durably during provisioning (see below); verify with:
 
 ```bash
-sudo timedatectl set-timezone UTC
+timedatectl  # Time zone must show Etc/UTC
 ```
+
+If a Pi is ever found on another timezone, correct it immediately with `sudo timedatectl set-timezone UTC` and fix the provisioning config so it cannot recur.
 
 The cron schedule must match `CRON_TIME_WINDOW_MINUTES`. The script floors each run to the nearest window boundary anchored to UTC midnight, so the window is deterministic regardless of when within the interval the script starts. `CRON_TIME_WINDOW_MINUTES` must evenly divide 1440 (minutes in a day) — the script exits with an error otherwise.
 
@@ -102,6 +104,19 @@ To update the bundle after a new release, run `update-shippo` (alias configured 
 No git, yarn, or npm required on the Pi — only `node`, `curl`, and `unzip` (for initial provisioning).
 
 ### Pi Provisioning (one-time setup)
+
+#### Timezone: UTC via cloud-init
+
+Raspberry Pi OS provisions headless setup with cloud-init. Set the timezone declaratively in `/boot/firmware/user-data` so it defaults to UTC on first boot and is restored whenever cloud-init re-runs (e.g. after bumping the `instance-id` in `/boot/firmware/meta-data` to regenerate network config, as in the 2026-06-09 recovery):
+
+```yaml
+# /boot/firmware/user-data (cloud-init)
+timezone: Etc/UTC
+```
+
+When imaging with Raspberry Pi Imager, do NOT let its OS customization set a local timezone — it writes the imaging machine's timezone into this same file. Verify after first boot with `timedatectl`.
+
+#### Bundle assets
 
 On first setup, the bundle directory must contain all static assets before the cron job runs. These files never change and only need to be downloaded once:
 
