@@ -53,7 +53,9 @@ function mrkdwnSection(text: string): unknown {
 
 /**
  * A standard-width container card with a header divider and a Twemoji icon.
- * Container titles do not render unicode emoji, hence the image icon.
+ * The container `icon` field only accepts an image element (no emoji type),
+ * so emoji are served as Twemoji PNGs. Unicode emoji in the plain_text title
+ * also did not render in the Slack client (observed 2026-08).
  */
 function containerBlock(params: {
   title: string;
@@ -160,11 +162,19 @@ export function formatErrorMessage(
   context: string,
   detail: string,
 ): SlackMessage {
-  const codeContent = escapeSlackText(`${context}\n${detail}`).slice(
-    0,
-    // Leave room for the code fence markers within the section limit.
-    SECTION_TEXT_LIMIT - 6,
-  );
+  // Escape before truncating: escaping only grows the string, so the limit
+  // must be enforced on the escaped form.
+  let codeContent = escapeSlackText(`${context}\n${detail}`);
+  const truncationMarker = '\n… (truncated)';
+  // Leave room for the code fence markers within the section limit.
+  const maxContent = SECTION_TEXT_LIMIT - 6;
+  if (codeContent.length > maxContent) {
+    codeContent = codeContent
+      .slice(0, maxContent - truncationMarker.length)
+      // Drop a partially sliced HTML entity (&amp; / &lt; / &gt;) at the cut.
+      .replace(/&[a-z]{0,3}$/, '');
+    codeContent += truncationMarker;
+  }
   return {
     text: `${context}: ${detail}`,
     blocks: [

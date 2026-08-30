@@ -216,12 +216,14 @@ export type TransactionOrderInfo = {
 /**
  * Best-effort lookup of the order a label transaction belongs to.
  * The SDK strips the order → transactions linkage (order.transactions items
- * parse to empty objects), so this pages the raw /orders endpoint newest-first
- * and matches the transaction object ID. The endpoint cannot filter by
- * transaction, so the search is capped at a few pages of recent orders.
+ * parse to empty objects), so this pages the raw /orders endpoint and matches
+ * the transaction object ID. The endpoint cannot filter by transaction and
+ * returns recent orders first (observed behavior; ordering is not documented
+ * in the API spec), so the search covers the ~75 most recent orders (3 pages
+ * of 25).
  * @param transactionId - The Shippo transaction object ID
  * @returns Order number, object ID, and recipient name; or undefined when no
- *   recent order references the transaction
+ *   searched order references the transaction
  */
 export async function fetchOrderForTransaction(
   transactionId: string,
@@ -243,10 +245,16 @@ export async function fetchOrderForTransaction(
     for (let page = 1; page <= maxPages; page++) {
       const res = await fetch(
         `https://api.goshippo.com/orders?results=25&page=${page}`,
-        { headers: { Authorization: `ShippoToken ${apiToken}` } },
+        {
+          headers: { Authorization: `ShippoToken ${apiToken}` },
+          signal: AbortSignal.timeout(10_000),
+        },
       );
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        const body = await res.text().catch(() => '');
+        throw new Error(
+          `HTTP ${res.status} ${res.statusText}${body ? ` — ${body}` : ''}`,
+        );
       }
       const data = (await res.json()) as {
         next?: string | null;
@@ -267,25 +275,35 @@ export async function fetchOrderForTransaction(
       }
 
       if (!data.next) {
-        break;
+        return undefined;
+      }
+      if (page === maxPages) {
+        // Distinguish "gave up" from "no order references this transaction".
+        console.warn(
+          `Warning: order lookup for transaction ${transactionId} gave up after ${maxPages} pages with more orders remaining`,
+        );
       }
     }
     return undefined;
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(
-        `Failed to fetch order for transaction: ${error.message}`,
+        `Failed to fetch order for transaction ${transactionId}: ${error.message}`,
+        { cause: error },
       );
     }
-    throw new Error('Failed to fetch order for transaction: Unknown error');
+    throw new Error(
+      `Failed to fetch order for transaction ${transactionId}: Unknown error`,
+    );
   }
 }
 
 /**
  * Resolve the recipient (ship-to) name for a transaction.
  * Walks the chain: transaction → rate → shipment → address_to.
- * The Shippo API has no path from a transaction back to its order, so the
- * recipient name is the closest available identity for label notifications.
+ * There is no direct transaction → order lookup, so when the order search
+ * (fetchOrderForTransaction) misses, the ship-to name from the shipment chain
+ * is the closest available identity for label notifications.
  * @param transactionId - The Shippo transaction object ID
  * @returns The recipient name, or undefined when the shipment has none
  */
@@ -313,9 +331,14 @@ export async function fetchRecipientName(
     return shipment.addressTo.name ?? undefined;
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`Failed to fetch recipient name: ${error.message}`);
+      throw new Error(
+        `Failed to fetch recipient name for transaction ${transactionId}: ${error.message}`,
+        { cause: error },
+      );
     }
-    throw new Error('Failed to fetch recipient name: Unknown error');
+    throw new Error(
+      `Failed to fetch recipient name for transaction ${transactionId}: Unknown error`,
+    );
   }
 }
 

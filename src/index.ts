@@ -119,17 +119,6 @@ async function runPackingSlipsJob(
         // Leave file on disk as deduplication sentinel for the lookback window
         console.log('');
         successCount++;
-        await sendSlackNotification(
-          formatPackingSlipPrintedMessage({
-            orderNumber,
-            orderObjectId: order.objectId,
-            recipientName: order.toAddress?.name ?? undefined,
-            totalItems: (order.lineItems ?? []).reduce(
-              (sum, item) => sum + (item.quantity ?? 0),
-              0,
-            ),
-          }),
-        );
       } catch (error) {
         // A partial or empty file may have been written to outputPath before
         // the error was thrown. It will be cleaned up by the OS eventually
@@ -148,7 +137,22 @@ async function runPackingSlipsJob(
             error instanceof Error ? error.message : String(error),
           ),
         );
+        continue;
       }
+
+      // Outside the try so a notification-path bug cannot fall into the
+      // catch above and misreport a printed order as a failure.
+      await sendSlackNotification(
+        formatPackingSlipPrintedMessage({
+          orderNumber,
+          orderObjectId: order.objectId,
+          recipientName: order.toAddress?.name ?? undefined,
+          totalItems: (order.lineItems ?? []).reduce(
+            (sum, item) => sum + (item.quantity ?? 0),
+            0,
+          ),
+        }),
+      );
     }
 
     return { success: successCount, errors: errorCount, skipped: skippedCount };
@@ -270,37 +274,6 @@ async function runLabelsJob(
         if (tx.objectId) {
           printedTransactionIds.push(tx.objectId);
         }
-
-        // Best-effort order/recipient lookup for the notification; a lookup
-        // failure must not count against the label run.
-        let orderInfo: TransactionOrderInfo | undefined;
-        if (tx.objectId) {
-          try {
-            orderInfo = await fetchOrderForTransaction(tx.objectId);
-          } catch (lookupError) {
-            console.warn(
-              `  Warning: ${lookupError instanceof Error ? lookupError.message : String(lookupError)}`,
-            );
-          }
-          if (!orderInfo?.recipientName) {
-            try {
-              const recipientName = await fetchRecipientName(tx.objectId);
-              orderInfo = { ...orderInfo, recipientName };
-            } catch (lookupError) {
-              console.warn(
-                `  Warning: ${lookupError instanceof Error ? lookupError.message : String(lookupError)}`,
-              );
-            }
-          }
-        }
-        await sendSlackNotification(
-          formatLabelPrintedMessage({
-            orderNumber: orderInfo?.orderNumber,
-            orderObjectId: orderInfo?.orderObjectId,
-            recipientName: orderInfo?.recipientName,
-            trackingNumber: tx.trackingNumber,
-          }),
-        );
       } catch (error) {
         // A partial or empty file may have been written to outputPath before
         // the error was thrown. It will be cleaned up by the OS eventually
@@ -319,7 +292,41 @@ async function runLabelsJob(
             error instanceof Error ? error.message : String(error),
           ),
         );
+        continue;
       }
+
+      // Outside the try so a notification-path bug cannot fall into the
+      // catch above and misreport a printed label as a failure. The
+      // order/recipient lookups are best-effort; their failures are warned
+      // and must not count against the label run.
+      let orderInfo: TransactionOrderInfo | undefined;
+      if (tx.objectId) {
+        try {
+          orderInfo = await fetchOrderForTransaction(tx.objectId);
+        } catch (lookupError) {
+          console.warn(
+            `  Warning: ${lookupError instanceof Error ? lookupError.message : String(lookupError)}`,
+          );
+        }
+        if (!orderInfo?.recipientName) {
+          try {
+            const recipientName = await fetchRecipientName(tx.objectId);
+            orderInfo = { ...orderInfo, recipientName };
+          } catch (lookupError) {
+            console.warn(
+              `  Warning: ${lookupError instanceof Error ? lookupError.message : String(lookupError)}`,
+            );
+          }
+        }
+      }
+      await sendSlackNotification(
+        formatLabelPrintedMessage({
+          orderNumber: orderInfo?.orderNumber,
+          orderObjectId: orderInfo?.orderObjectId,
+          recipientName: orderInfo?.recipientName,
+          trackingNumber: tx.trackingNumber,
+        }),
+      );
     }
 
     return {
@@ -496,6 +503,8 @@ async function run() {
 
 run().catch(async (error) => {
   console.error('Fatal error:', error);
+  // Reaching process.exit(1) depends on sendSlackNotification never
+  // throwing; a rejection here would skip the exit code.
   await sendSlackNotification(
     formatErrorMessage(
       'Fatal error',

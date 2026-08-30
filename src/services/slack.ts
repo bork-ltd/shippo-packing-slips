@@ -1,5 +1,10 @@
 import type { SlackMessage } from '../lib/slack-message';
 
+// Abort a webhook post that stalls; undici would otherwise wait ~300s and
+// notifications are awaited serially, so a blackholing endpoint could stall
+// the whole run.
+const SLACK_TIMEOUT_MS = 10_000;
+
 /**
  * Send a message to the Slack incoming webhook configured via SLACK_WEBHOOK_URL.
  *
@@ -21,15 +26,18 @@ export async function sendSlackNotification(
       body: JSON.stringify(message),
       headers: { 'Content-Type': 'application/json' },
       method: 'POST',
+      signal: AbortSignal.timeout(SLACK_TIMEOUT_MS),
     });
     if (!res.ok) {
+      // Slack returns diagnostic bodies on 4xx (e.g. invalid_blocks).
+      const body = await res.text().catch(() => '');
       console.warn(
-        `Warning: Slack notification failed: HTTP ${res.status} ${res.statusText}`,
+        `Warning: Slack notification failed for "${message.text}": HTTP ${res.status} ${res.statusText}${body ? ` — ${body}` : ''}`,
       );
     }
   } catch (error) {
     console.warn(
-      `Warning: Slack notification failed: ${error instanceof Error ? error.message : String(error)}`,
+      `Warning: Slack notification failed for "${message.text}": ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

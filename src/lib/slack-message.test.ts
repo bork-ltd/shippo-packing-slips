@@ -118,6 +118,14 @@ describe('formatPackingSlipPrintedMessage', () => {
     expect(childTexts(message)).toEqual(['*Order:* 1234']);
   });
 
+  it('renders a zero item count rather than omitting it', () => {
+    const message = formatPackingSlipPrintedMessage({
+      orderNumber: '1234',
+      totalItems: 0,
+    });
+    expect(childTexts(message)).toEqual(['*Order:* 1234', '*Total Items:* 0']);
+  });
+
   it('escapes mrkdwn characters in the order number', () => {
     const message = formatPackingSlipPrintedMessage({
       orderNumber: '<1234>',
@@ -247,12 +255,35 @@ describe('formatErrorMessage', () => {
     );
   });
 
-  it('truncates the code block within the 3000-character section limit', () => {
+  it('truncates the code block within the 3000-character section limit, keeping the fences and adding a marker', () => {
     const message = formatErrorMessage('Fatal error', 'x'.repeat(4000));
     const callout = container(message).child_blocks[0] as unknown as {
       child_blocks: { text: { text: string } }[];
     };
-    expect(callout.child_blocks[0].text.text.length).toBeLessThanOrEqual(3000);
+    const text = callout.child_blocks[0].text.text;
+    expect(text.length).toBeLessThanOrEqual(3000);
+    expect(text.startsWith('```Fatal error')).toBe(true);
+    expect(text.endsWith('… (truncated)```')).toBe(true);
     expect(message.text).toBe(`Fatal error: ${'x'.repeat(4000)}`);
+  });
+
+  it('does not leave a partially sliced HTML entity at the truncation point', () => {
+    // Fill so that the escaped '&' of a trailing '&amp;' lands right at the cut.
+    const detail = `${'x'.repeat(2960)}${'&'.repeat(20)}`;
+    const message = formatErrorMessage('E', detail);
+    const callout = container(message).child_blocks[0] as unknown as {
+      child_blocks: { text: { text: string } }[];
+    };
+    const text = callout.child_blocks[0].text.text;
+    expect(text).not.toMatch(/&[a-z]{0,3}\n… \(truncated\)```$/);
+    expect(text.endsWith('… (truncated)```')).toBe(true);
+  });
+
+  it('does not truncate content at or under the limit', () => {
+    const message = formatErrorMessage('E', 'short detail');
+    const callout = container(message).child_blocks[0] as unknown as {
+      child_blocks: { text: { text: string } }[];
+    };
+    expect(callout.child_blocks[0].text.text).toBe('```E\nshort detail```');
   });
 });
