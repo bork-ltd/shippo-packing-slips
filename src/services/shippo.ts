@@ -207,6 +207,141 @@ export async function fetchPickupDetails(
   }
 }
 
+export type TransactionOrderInfo = {
+  orderNumber?: string;
+  orderObjectId?: string;
+  recipientName?: string;
+};
+
+/**
+ * Best-effort lookup of the order a label transaction belongs to.
+ * The SDK strips the order → transactions linkage (order.transactions items
+ * parse to empty objects), so this pages the raw /orders endpoint and matches
+ * the transaction object ID. The endpoint cannot filter by transaction and
+ * returns recent orders first (observed behavior; ordering is not documented
+ * in the API spec), so the search covers the ~75 most recent orders (3 pages
+ * of 25).
+ * @param transactionId - The Shippo transaction object ID
+ * @returns Order number, object ID, and recipient name; or undefined when no
+ *   searched order references the transaction
+ */
+export async function fetchOrderForTransaction(
+  transactionId: string,
+): Promise<TransactionOrderInfo | undefined> {
+  const apiToken = process.env.SHIPPO_API_TOKEN;
+  if (!apiToken) {
+    throw new Error('SHIPPO_API_TOKEN environment variable is required');
+  }
+
+  type RawOrder = {
+    object_id?: string;
+    order_number?: string;
+    to_address?: { name?: string };
+    transactions?: { object_id?: string }[];
+  };
+
+  const maxPages = 3;
+  try {
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await fetch(
+        `https://api.goshippo.com/orders?results=25&page=${page}`,
+        {
+          headers: { Authorization: `ShippoToken ${apiToken}` },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(
+          `HTTP ${res.status} ${res.statusText}${body ? ` — ${body}` : ''}`,
+        );
+      }
+      const data = (await res.json()) as {
+        next?: string | null;
+        results?: RawOrder[];
+      };
+
+      for (const order of data.results ?? []) {
+        const match = order.transactions?.some(
+          (tx) => tx.object_id === transactionId,
+        );
+        if (match) {
+          return {
+            orderNumber: order.order_number,
+            orderObjectId: order.object_id,
+            recipientName: order.to_address?.name,
+          };
+        }
+      }
+
+      if (!data.next) {
+        return undefined;
+      }
+      if (page === maxPages) {
+        // Distinguish "gave up" from "no order references this transaction".
+        console.warn(
+          `Warning: order lookup for transaction ${transactionId} gave up after ${maxPages} pages with more orders remaining`,
+        );
+      }
+    }
+    return undefined;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(
+        `Failed to fetch order for transaction ${transactionId}: ${error.message}`,
+        { cause: error },
+      );
+    }
+    throw new Error(
+      `Failed to fetch order for transaction ${transactionId}: Unknown error`,
+    );
+  }
+}
+
+/**
+ * Resolve the recipient (ship-to) name for a transaction.
+ * Walks the chain: transaction → rate → shipment → address_to.
+ * There is no direct transaction → order lookup, so when the order search
+ * (fetchOrderForTransaction) misses, the ship-to name from the shipment chain
+ * is the closest available identity for label notifications.
+ * @param transactionId - The Shippo transaction object ID
+ * @returns The recipient name, or undefined when the shipment has none
+ */
+export async function fetchRecipientName(
+  transactionId: string,
+): Promise<string | undefined> {
+  const client = createShippoClient();
+
+  try {
+    const transaction = await client.transactions.get(transactionId);
+    const transactionRate = transaction.rate;
+
+    const rateId =
+      typeof transactionRate === 'string'
+        ? transactionRate
+        : transactionRate?.objectId;
+
+    if (!rateId) {
+      throw new Error('Unable to resolve rate ID from transaction');
+    }
+
+    const rate = await client.rates.get(rateId);
+    const shipment = await client.shipments.get(rate.shipment);
+
+    return shipment.addressTo.name ?? undefined;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(
+        `Failed to fetch recipient name for transaction ${transactionId}: ${error.message}`,
+        { cause: error },
+      );
+    }
+    throw new Error(
+      `Failed to fetch recipient name for transaction ${transactionId}: Unknown error`,
+    );
+  }
+}
+
 /**
  * Schedule a carrier pickup for one or more existing transactions via the Shippo pickups API.
  * The carrier is determined by the carrier account embedded in the request.

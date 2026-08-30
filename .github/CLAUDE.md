@@ -10,7 +10,7 @@
 
 **typecheck.yml** — Runs `yarn typecheck` (`tsc --noEmit`) on PRs targeting `main`. Enforces TypeScript type correctness.
 
-**unit-tests.yml** — Runs `yarn test` (Vitest) on PRs targeting `main`. Enforces that all unit tests pass and that `src/lib/**` maintains 100% coverage.
+**unit-tests.yml** — Runs `yarn test --coverage` (Vitest) on PRs targeting `main`. Enforces that all unit tests pass and that `src/lib/**` maintains 100% coverage, then uploads the Cobertura report to GitHub Code Quality via `actions/upload-code-coverage` (feeds the enterprise code coverage ruleset; needs the `code-quality: write` job permission).
 
 **integration-tests.yml** — Runs `yarn test:integration` (Vitest) on PRs targeting `main`, on a weekly Monday cron, and on manual dispatch. Calls the real Shippo test-mode API via `SHIPPO_TEST_API_TOKEN` secret. Uses `github.ref` in the concurrency group (rather than `pull_request.number`) because the workflow has three triggers and `pull_request.number` is empty for schedule/dispatch runs.
 

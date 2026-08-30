@@ -36,6 +36,7 @@ yarn generate               # fetch orders and generate PDFs
 | `PICKUP_BUILDING_LOCATION_TYPE` | No | `Front Door` | Where parcels will be available for pickup (see `.env.example` for valid values) |
 | `PICKUP_INSTRUCTIONS` | No | | Courier instructions; required when `PICKUP_BUILDING_LOCATION_TYPE` is `Other` |
 | `INCLUDE_ALL_ORDER_STATUSES` | No | `false` | Set to `true` to fetch all order statuses instead of only `PAID` |
+| `SLACK_WEBHOOK_URL` | No | | Slack incoming webhook URL; when set, posts a message for each printed packing slip, printed label, and error |
 
 Values in `.env.local` override `.env`.
 

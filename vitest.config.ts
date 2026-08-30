@@ -8,6 +8,7 @@ export default defineConfig({
     exclude: ['src/integration/**'],
     coverage: {
       provider: 'v8',
+      reporter: ['text', 'cobertura'],
       include: ['src/lib/**'],
       thresholds: {
         lines: 100,

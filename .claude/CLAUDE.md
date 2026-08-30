@@ -31,6 +31,10 @@ See [settings.json](settings.json) for the current list of approved commands.
 
 Local settings override shared settings, allowing individual users to customize their experience while maintaining common defaults.
 
+### Plugins
+
+`enabledPlugins` in settings.json enables the Slack plugin (`slack@claude-plugins-official`) for all users of this repository, used when working on the Slack webhook notification formatting.
+
 ## MCP Configuration
 
 - `.mcp.json` (repo root) — project-scoped MCP servers, committed to the repository and shared with all collaborators including cloud environments

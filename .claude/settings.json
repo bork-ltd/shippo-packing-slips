@@ -1,6 +1,4 @@
 {
-  "enableAllProjectMcpServers": true,
-  "enabledMcpjsonServers": ["github"],
   "permissions": {
     "allow": [
       "Bash(gh issue create:*)",
@@ -69,5 +67,10 @@
       "Read(file:.env*)",
       "Write(file:.env*)"
     ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": ["github"],
+  "enabledPlugins": {
+    "slack@claude-plugins-official": true
   }
 }
