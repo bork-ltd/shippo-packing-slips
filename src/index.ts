@@ -2,6 +2,11 @@ import { access, constants, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { OrderStatusEnum } from 'shippo/models/components';
+import {
+  formatErrorMessage,
+  formatLabelPrintedMessage,
+  formatPackingSlipPrintedMessage,
+} from './lib/slack-message';
 import { calculateTimeWindow } from './lib/time-window';
 import { validatePickupConfig } from './lib/validate-pickup-config';
 import { generatePackingSlip } from './services/pdf-generator';
@@ -9,9 +14,11 @@ import { printPDF } from './services/printer';
 import {
   fetchOrders,
   fetchPickupDetails,
+  fetchRecipientName,
   fetchTransactions,
   schedulePickup,
 } from './services/shippo';
+import { sendSlackNotification } from './services/slack';
 
 // Load environment variables (.env.local overrides .env)
 dotenv.config();
@@ -110,6 +117,13 @@ async function runPackingSlipsJob(
         // Leave file on disk as deduplication sentinel for the lookback window
         console.log('');
         successCount++;
+        await sendSlackNotification(
+          formatPackingSlipPrintedMessage({
+            orderNumber,
+            orderObjectId: order.objectId,
+            recipientName: order.toAddress?.name ?? undefined,
+          }),
+        );
       } catch (error) {
         // A partial or empty file may have been written to outputPath before
         // the error was thrown. It will be cleaned up by the OS eventually
@@ -122,6 +136,12 @@ async function runPackingSlipsJob(
         }
         console.log('');
         errorCount++;
+        await sendSlackNotification(
+          formatErrorMessage(
+            `Failed to process order ${orderNumber}`,
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
       }
     }
 
@@ -133,6 +153,12 @@ async function runPackingSlipsJob(
     } else {
       console.error('Error:', error);
     }
+    await sendSlackNotification(
+      formatErrorMessage(
+        'Packing slips job failed',
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
     return { success: 0, errors: 1, skipped: 0 };
   }
 }
@@ -238,6 +264,25 @@ async function runLabelsJob(
         if (tx.objectId) {
           printedTransactionIds.push(tx.objectId);
         }
+
+        // Best-effort recipient lookup for the notification; a lookup failure
+        // must not count against the label run.
+        let recipientName: string | undefined;
+        if (tx.objectId) {
+          try {
+            recipientName = await fetchRecipientName(tx.objectId);
+          } catch (lookupError) {
+            console.warn(
+              `  Warning: ${lookupError instanceof Error ? lookupError.message : String(lookupError)}`,
+            );
+          }
+        }
+        await sendSlackNotification(
+          formatLabelPrintedMessage({
+            recipientName,
+            trackingNumber: tx.trackingNumber,
+          }),
+        );
       } catch (error) {
         // A partial or empty file may have been written to outputPath before
         // the error was thrown. It will be cleaned up by the OS eventually
@@ -250,6 +295,12 @@ async function runLabelsJob(
         }
         console.log('');
         errorCount++;
+        await sendSlackNotification(
+          formatErrorMessage(
+            `Failed to process label for transaction ${objectId}`,
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
       }
     }
 
@@ -266,6 +317,12 @@ async function runLabelsJob(
     } else {
       console.error('Error:', error);
     }
+    await sendSlackNotification(
+      formatErrorMessage(
+        'Labels job failed',
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
     return { success: 0, errors: 1, skipped: 0, printedTransactionIds: [] };
   }
 }
@@ -397,6 +454,12 @@ async function run() {
     pickupSummary = `scheduled${confirmation}${window}`;
   } else {
     pickupSummary = `FAILED — ${pickupResult.error}`;
+    await sendSlackNotification(
+      formatErrorMessage(
+        'Pickup scheduling failed',
+        pickupResult.error ?? 'Unknown error',
+      ),
+    );
   }
 
   console.log('='.repeat(50));
@@ -413,7 +476,13 @@ async function run() {
   process.exit(combinedErrors > 0 ? 1 : 0);
 }
 
-run().catch((error) => {
+run().catch(async (error) => {
   console.error('Fatal error:', error);
+  await sendSlackNotification(
+    formatErrorMessage(
+      'Fatal error',
+      error instanceof Error ? error.message : String(error),
+    ),
+  );
   process.exit(1);
 });

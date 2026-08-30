@@ -208,6 +208,44 @@ export async function fetchPickupDetails(
 }
 
 /**
+ * Resolve the recipient (ship-to) name for a transaction.
+ * Walks the chain: transaction → rate → shipment → address_to.
+ * The Shippo API has no path from a transaction back to its order, so the
+ * recipient name is the closest available identity for label notifications.
+ * @param transactionId - The Shippo transaction object ID
+ * @returns The recipient name, or undefined when the shipment has none
+ */
+export async function fetchRecipientName(
+  transactionId: string,
+): Promise<string | undefined> {
+  const client = createShippoClient();
+
+  try {
+    const transaction = await client.transactions.get(transactionId);
+    const transactionRate = transaction.rate;
+
+    const rateId =
+      typeof transactionRate === 'string'
+        ? transactionRate
+        : transactionRate?.objectId;
+
+    if (!rateId) {
+      throw new Error('Unable to resolve rate ID from transaction');
+    }
+
+    const rate = await client.rates.get(rateId);
+    const shipment = await client.shipments.get(rate.shipment);
+
+    return shipment.addressTo.name ?? undefined;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to fetch recipient name: ${error.message}`);
+    }
+    throw new Error('Failed to fetch recipient name: Unknown error');
+  }
+}
+
+/**
  * Schedule a carrier pickup for one or more existing transactions via the Shippo pickups API.
  * The carrier is determined by the carrier account embedded in the request.
  * @param request - PickupBase object containing carrier account, location, time window, and transaction IDs
