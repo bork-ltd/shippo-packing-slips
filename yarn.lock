@@ -1544,18 +1544,18 @@ __metadata:
     dotenv: "npm:17.2.3"
     lefthook: "npm:2.1.10"
     pdfkit: "npm:0.17.2"
-    shippo: "npm:2.17.4"
+    shippo: "npm:2.18.0"
     typescript: "npm:5.9.3"
     vitest: "npm:4.1.11"
   languageName: unknown
   linkType: soft
 
-"shippo@npm:2.17.4":
-  version: 2.17.4
-  resolution: "shippo@npm:2.17.4"
+"shippo@npm:2.18.0":
+  version: 2.18.0
+  resolution: "shippo@npm:2.18.0"
   dependencies:
     zod: "npm:^3.25.65 || ^4.0.0"
-  checksum: 10c0/90ca7f135032a491c94eea0ac82eb6a76c4c2efbdd7dcecb1f37e4229776d61a2ad8fecd34dfdd445974dfde1a005b7c05f9c1269775fa555638c6d919ea9ae9
+  checksum: 10c0/7b536918fcb0aa31e1c776ec9bcb608ec1d40fb4d035d2ac7f0b789a46790f689f6c3d65de56cd441690de9556585a0c582b0c2bf21496ef51ec1722bef573ae
   languageName: node
   linkType: hard
 
