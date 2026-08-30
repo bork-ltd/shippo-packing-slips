@@ -8,6 +8,7 @@ I/O-bound modules used by `src/index.ts`. All modules here interact with externa
 - `printer.ts` — `printPDF(filePath)` — submits a PDF to CUPS via `lp`; requires `CUPS_PRINTER_NAME` env var
 - `shippo.ts` — `fetchOrders()`, `fetchTransactions()`, `fetchPickupDetails()`, `fetchOrderForTransaction()`, `fetchRecipientName()`, `schedulePickup()` — Shippo API calls; requires `SHIPPO_API_TOKEN` env var. See JSDoc in `shippo.ts` for function-level details. `fetchOrderForTransaction` uses the raw HTTP API because the SDK strips the order → transactions linkage.
 - `slack.ts` — `sendSlackNotification(message)` — posts a `SlackMessage` payload (built by the `src/lib/slack-message.ts` formatters) to the Slack incoming webhook in `SLACK_WEBHOOK_URL`; silent no-op when unset, never throws
+- `healthcheck.ts` — `sendHeartbeat()` — pings the dead-man's-switch URL in `HEALTHCHECK_PING_URL`; called only on a clean run (`src/index.ts` exit-0 path); silent no-op when unset, never throws
 
 ## Printer notes
 
