@@ -3,6 +3,10 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { OrderStatusEnum } from 'shippo/models/components';
 import {
+  isDuplicatePickupError,
+  pickupSentinelPath,
+} from './lib/duplicate-pickup';
+import {
   formatErrorMessage,
   formatLabelPrintedMessage,
   formatPackingSlipPrintedMessage,
@@ -355,6 +359,7 @@ async function runLabelsJob(
 
 async function runPickupJob(transactionIds: string[]): Promise<{
   scheduled: boolean;
+  alreadyScheduled?: boolean;
   confirmationCode?: string;
   confirmedStartTime?: string;
   confirmedEndTime?: string;
@@ -362,6 +367,21 @@ async function runPickupJob(transactionIds: string[]): Promise<{
 }> {
   if (transactionIds.length === 0) {
     return { scheduled: false };
+  }
+
+  // One pickup request per UTC day: USPS rejects further requests and collects
+  // additional packages with the existing pickup. The sentinel avoids the
+  // redundant API attempt; if /tmp was cleared (reboot), the one redundant
+  // attempt is answered by the duplicate-pickup response below.
+  const sentinelPath = pickupSentinelPath(new Date());
+  try {
+    await access(sentinelPath, constants.F_OK);
+    console.log(
+      '↩ Pickup already requested today; packages will be collected with the existing pickup.',
+    );
+    return { scheduled: false, alreadyScheduled: true };
+  } catch {
+    // No sentinel — proceed to schedule
   }
 
   const configResult = validatePickupConfig(
@@ -403,6 +423,7 @@ async function runPickupJob(transactionIds: string[]): Promise<{
       },
     });
 
+    await writePickupSentinel(sentinelPath);
     return {
       scheduled: true,
       confirmationCode: pickup.confirmationCode,
@@ -411,8 +432,26 @@ async function runPickupJob(transactionIds: string[]): Promise<{
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
+    if (isDuplicatePickupError(message)) {
+      console.log(
+        '↩ USPS reports a pickup was already requested today; packages will be collected with the existing pickup.',
+      );
+      await writePickupSentinel(sentinelPath);
+      return { scheduled: false, alreadyScheduled: true };
+    }
     console.error(`✗ Pickup scheduling failed: ${message}`);
     return { scheduled: false, error: message };
+  }
+}
+
+/** Best-effort write of the daily pickup sentinel; failure only costs a redundant API attempt later today. */
+async function writePickupSentinel(sentinelPath: string): Promise<void> {
+  try {
+    await writeFile(sentinelPath, '');
+  } catch (error) {
+    console.warn(
+      `  Warning: failed to write pickup sentinel ${sentinelPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -469,6 +508,9 @@ async function run() {
   let pickupSummary: string;
   if (labelResults.printedTransactionIds.length === 0) {
     pickupSummary = 'not scheduled (no new labels this run)';
+  } else if (pickupResult.alreadyScheduled) {
+    pickupSummary =
+      'already requested today — packages will be collected with the existing pickup';
   } else if (pickupResult.scheduled) {
     const confirmation = pickupResult.confirmationCode
       ? ` (confirmation: ${pickupResult.confirmationCode})`
@@ -500,9 +542,13 @@ async function run() {
   console.log('='.repeat(50));
 
   // A pickup that should have been scheduled but wasn't is a run failure,
-  // matching the Slack FAILED notification above.
+  // matching the Slack FAILED notification above. A pickup already requested
+  // earlier today is not a failure — USPS collects additional packages with
+  // the existing pickup.
   const pickupFailed =
-    labelResults.printedTransactionIds.length > 0 && !pickupResult.scheduled;
+    labelResults.printedTransactionIds.length > 0 &&
+    !pickupResult.scheduled &&
+    !pickupResult.alreadyScheduled;
   const runFailed = combinedErrors > 0 || pickupFailed;
 
   // Heartbeat only on a clean run — a failing run must NOT ping, so the
