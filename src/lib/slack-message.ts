@@ -1,5 +1,17 @@
 const SHIPPO_ORDER_URL_BASE = 'https://apps.goshippo.com/orders';
 
+// Slack section block text objects cap at 3000 characters.
+const SECTION_TEXT_LIMIT = 3000;
+
+/**
+ * A Slack incoming-webhook payload. `text` is the notification and
+ * screen-reader fallback for the Block Kit `blocks`.
+ */
+export type SlackMessage = {
+  text: string;
+  blocks: unknown[];
+};
+
 /**
  * Escape text for Slack mrkdwn per https://docs.slack.dev/messaging/formatting-message-text
  * Only &, <, and > are control characters in Slack message text.
@@ -26,6 +38,25 @@ export function shippoOrderUrl(
 }
 
 /**
+ * Wrap detail blocks in a full-width container card with a plain_text title.
+ * Emoji in the title must use shortcode form (e.g. ":label:"); unicode emoji
+ * do not render in container titles.
+ */
+function containerBlock(title: string, mrkdwnText: string): unknown {
+  return {
+    type: 'container',
+    title: { type: 'plain_text', text: title, emoji: true },
+    width: 'full',
+    child_blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: mrkdwnText },
+      },
+    ],
+  };
+}
+
+/**
  * Build the Slack message for a printed packing slip.
  * Links the order number to the Shippo UI when an order object ID is available.
  */
@@ -33,15 +64,21 @@ export function formatPackingSlipPrintedMessage(params: {
   orderNumber: string;
   recipientName?: string;
   orderObjectId?: string;
-}): string {
+}): SlackMessage {
   const { orderNumber, recipientName, orderObjectId } = params;
   const url = shippoOrderUrl(orderObjectId);
-  const orderText = escapeSlackText(orderNumber);
+  const orderText = `Order ${escapeSlackText(orderNumber)}`;
   const orderRef = url ? `<${url}|${orderText}>` : orderText;
-  const recipient = recipientName
-    ? ` for ${escapeSlackText(recipientName)}`
-    : '';
-  return `:page_facing_up: Packing slip printed — order ${orderRef}${recipient}`;
+  const recipient = recipientName ? ` — ${escapeSlackText(recipientName)}` : '';
+  return {
+    text: `Packing slip printed — order ${orderNumber}${recipientName ? ` for ${recipientName}` : ''}`,
+    blocks: [
+      containerBlock(
+        ':page_facing_up: Packing slip printed',
+        `${orderRef}${recipient}`,
+      ),
+    ],
+  };
 }
 
 /**
@@ -53,22 +90,52 @@ export function formatPackingSlipPrintedMessage(params: {
 export function formatLabelPrintedMessage(params: {
   trackingNumber?: string;
   recipientName?: string;
-}): string {
+}): SlackMessage {
   const { trackingNumber, recipientName } = params;
-  const recipient = recipientName
-    ? ` for ${escapeSlackText(recipientName)}`
+  const detailParts: string[] = [];
+  if (recipientName) {
+    detailParts.push(escapeSlackText(recipientName));
+  }
+  if (trackingNumber) {
+    detailParts.push(`tracking \`${escapeSlackText(trackingNumber)}\``);
+  }
+  const detail = detailParts.length > 0 ? detailParts.join(' — ') : 'Printed';
+  const fallbackRecipient = recipientName ? ` for ${recipientName}` : '';
+  const fallbackTracking = trackingNumber
+    ? ` (tracking ${trackingNumber})`
     : '';
-  const tracking = trackingNumber
-    ? ` (tracking ${escapeSlackText(trackingNumber)})`
-    : '';
-  return `:label: Shipping label printed${recipient}${tracking}`;
+  return {
+    text: `Shipping label printed${fallbackRecipient}${fallbackTracking}`,
+    blocks: [containerBlock(':label: Shipping label printed', detail)],
+  };
 }
 
 /**
- * Build the Slack message for an error.
+ * Build the Slack message for an error as an orange callout.
  * @param context - What was being attempted (e.g. "Failed to process order 1234")
  * @param detail - The error message
  */
-export function formatErrorMessage(context: string, detail: string): string {
-  return `:x: ${escapeSlackText(context)}: ${escapeSlackText(detail)}`;
+export function formatErrorMessage(
+  context: string,
+  detail: string,
+): SlackMessage {
+  const mrkdwn = `:x: *${escapeSlackText(context)}*\n${escapeSlackText(detail)}`;
+  return {
+    text: `${context}: ${detail}`,
+    blocks: [
+      {
+        type: 'callout',
+        background_color: 'orange',
+        child_blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: mrkdwn.slice(0, SECTION_TEXT_LIMIT),
+            },
+          },
+        ],
+      },
+    ],
+  };
 }

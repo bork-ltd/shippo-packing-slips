@@ -8,6 +8,13 @@ import {
   shippoOrderUrl,
 } from './slack-message';
 
+function sectionText(message: { blocks: unknown[] }): string {
+  const block = message.blocks[0] as {
+    child_blocks: { text: { text: string } }[];
+  };
+  return block.child_blocks[0].text.text;
+}
+
 describe('escapeSlackText', () => {
   it('escapes Slack mrkdwn control characters', () => {
     expect(escapeSlackText('a & b <c> d')).toBe('a &amp; b &lt;c&gt; d');
@@ -39,86 +46,145 @@ describe('shippoOrderUrl', () => {
 });
 
 describe('formatPackingSlipPrintedMessage', () => {
-  it('links the order number when an object ID is available', () => {
-    expect(
-      formatPackingSlipPrintedMessage({
-        orderNumber: '1234',
-        recipientName: 'Jane Doe',
-        orderObjectId: 'abc123',
-      }),
-    ).toBe(
-      ':page_facing_up: Packing slip printed — order <https://apps.goshippo.com/orders/abc123|1234> for Jane Doe',
-    );
+  it('builds a full-width container with a linked order and fallback text', () => {
+    const message = formatPackingSlipPrintedMessage({
+      orderNumber: '1234',
+      recipientName: 'Jane Doe',
+      orderObjectId: 'abc123',
+    });
+    expect(message.text).toBe('Packing slip printed — order 1234 for Jane Doe');
+    expect(message.blocks).toEqual([
+      {
+        type: 'container',
+        title: {
+          type: 'plain_text',
+          text: ':page_facing_up: Packing slip printed',
+          emoji: true,
+        },
+        width: 'full',
+        child_blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '<https://apps.goshippo.com/orders/abc123|Order 1234> — Jane Doe',
+            },
+          },
+        ],
+      },
+    ]);
   });
 
-  it('falls back to plain text without an object ID', () => {
-    expect(
-      formatPackingSlipPrintedMessage({
-        orderNumber: '1234',
-        recipientName: 'Jane Doe',
-      }),
-    ).toBe(':page_facing_up: Packing slip printed — order 1234 for Jane Doe');
+  it('falls back to plain order text without an object ID', () => {
+    const message = formatPackingSlipPrintedMessage({
+      orderNumber: '1234',
+      recipientName: 'Jane Doe',
+    });
+    expect(sectionText(message)).toBe('Order 1234 — Jane Doe');
   });
 
   it('omits the recipient when no name is available', () => {
-    expect(formatPackingSlipPrintedMessage({ orderNumber: '1234' })).toBe(
-      ':page_facing_up: Packing slip printed — order 1234',
-    );
+    const message = formatPackingSlipPrintedMessage({ orderNumber: '1234' });
+    expect(sectionText(message)).toBe('Order 1234');
+    expect(message.text).toBe('Packing slip printed — order 1234');
   });
 
   it('escapes mrkdwn characters in order number and name', () => {
-    expect(
-      formatPackingSlipPrintedMessage({
-        orderNumber: '<1234>',
-        recipientName: 'Jane & Co',
-      }),
-    ).toBe(
-      ':page_facing_up: Packing slip printed — order &lt;1234&gt; for Jane &amp; Co',
-    );
+    const message = formatPackingSlipPrintedMessage({
+      orderNumber: '<1234>',
+      recipientName: 'Jane & Co',
+    });
+    expect(sectionText(message)).toBe('Order &lt;1234&gt; — Jane &amp; Co');
   });
 });
 
 describe('formatLabelPrintedMessage', () => {
   it('includes recipient and tracking number when available', () => {
-    expect(
-      formatLabelPrintedMessage({
-        trackingNumber: '9400111899560000000000',
-        recipientName: 'Jane Doe',
-      }),
-    ).toBe(
-      ':label: Shipping label printed for Jane Doe (tracking 9400111899560000000000)',
+    const message = formatLabelPrintedMessage({
+      trackingNumber: '9400111899560000000000',
+      recipientName: 'Jane Doe',
+    });
+    expect(message.text).toBe(
+      'Shipping label printed for Jane Doe (tracking 9400111899560000000000)',
     );
+    expect(message.blocks).toEqual([
+      {
+        type: 'container',
+        title: {
+          type: 'plain_text',
+          text: ':label: Shipping label printed',
+          emoji: true,
+        },
+        width: 'full',
+        child_blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Jane Doe — tracking `9400111899560000000000`',
+            },
+          },
+        ],
+      },
+    ]);
   });
 
   it('omits recipient when no name is available', () => {
-    expect(formatLabelPrintedMessage({ trackingNumber: '9400' })).toBe(
-      ':label: Shipping label printed (tracking 9400)',
-    );
+    const message = formatLabelPrintedMessage({ trackingNumber: '9400' });
+    expect(sectionText(message)).toBe('tracking `9400`');
+    expect(message.text).toBe('Shipping label printed (tracking 9400)');
   });
 
   it('omits tracking when no tracking number is available', () => {
-    expect(formatLabelPrintedMessage({ recipientName: 'Jane Doe' })).toBe(
-      ':label: Shipping label printed for Jane Doe',
-    );
+    const message = formatLabelPrintedMessage({ recipientName: 'Jane Doe' });
+    expect(sectionText(message)).toBe('Jane Doe');
+    expect(message.text).toBe('Shipping label printed for Jane Doe');
   });
 
-  it('handles neither recipient nor tracking', () => {
-    expect(formatLabelPrintedMessage({})).toBe(
-      ':label: Shipping label printed',
-    );
+  it('uses placeholder detail when neither recipient nor tracking exists', () => {
+    const message = formatLabelPrintedMessage({});
+    expect(sectionText(message)).toBe('Printed');
+    expect(message.text).toBe('Shipping label printed');
   });
 });
 
 describe('formatErrorMessage', () => {
-  it('joins context and detail', () => {
-    expect(formatErrorMessage('Failed to process order 1234', 'HTTP 500')).toBe(
-      ':x: Failed to process order 1234: HTTP 500',
+  it('builds an orange callout with bold context and fallback text', () => {
+    const message = formatErrorMessage(
+      'Failed to process order 1234',
+      'HTTP 500',
     );
+    expect(message.text).toBe('Failed to process order 1234: HTTP 500');
+    expect(message.blocks).toEqual([
+      {
+        type: 'callout',
+        background_color: 'orange',
+        child_blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: ':x: *Failed to process order 1234*\nHTTP 500',
+            },
+          },
+        ],
+      },
+    ]);
   });
 
   it('escapes mrkdwn characters', () => {
-    expect(formatErrorMessage('Fatal error', 'fetch failed <ECONNRESET>')).toBe(
-      ':x: Fatal error: fetch failed &lt;ECONNRESET&gt;',
+    const message = formatErrorMessage(
+      'Fatal error',
+      'fetch failed <ECONNRESET>',
     );
+    expect(sectionText(message)).toBe(
+      ':x: *Fatal error*\nfetch failed &lt;ECONNRESET&gt;',
+    );
+  });
+
+  it('truncates section text to the 3000-character Slack limit', () => {
+    const message = formatErrorMessage('Fatal error', 'x'.repeat(4000));
+    expect(sectionText(message)).toHaveLength(3000);
+    expect(message.text).toBe(`Fatal error: ${'x'.repeat(4000)}`);
   });
 });
