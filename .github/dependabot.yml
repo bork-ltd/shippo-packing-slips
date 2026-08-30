@@ -31,8 +31,3 @@ updates:
     groups:
       development-dependencies:
         dependency-type: 'development'
-    ignore:
-      - dependency-name: '*'
-        versions: ['version-update:semver-major']
-      - dependency-name: 'typescript' # This is likely to conflict with peer dependencies and stop the whole dependency update process
-        versions: ['*']
