@@ -154,7 +154,11 @@ CUPS_PRINTER_NAME=Knaon
 COMPANY_NAME=...
 ```
 
-See `.env.example` for all available variables.
+See `.env.example` for all available variables, including the optional
+`SLACK_WEBHOOK_URL` (per-print and per-error notifications) and
+`HEALTHCHECK_PING_URL` (dead-man's-switch pinged on successful runs; set the
+monitor's period to match `CRON_TIME_WINDOW_MINUTES` so a missed ping alerts
+when the Pi is offline or hung).
 
 ## Printer
 

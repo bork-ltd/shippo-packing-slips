@@ -9,6 +9,7 @@ import {
 } from './lib/slack-message';
 import { calculateTimeWindow } from './lib/time-window';
 import { validatePickupConfig } from './lib/validate-pickup-config';
+import { sendHeartbeat } from './services/healthcheck';
 import { generatePackingSlip } from './services/pdf-generator';
 import { printPDF } from './services/printer';
 import {
@@ -497,6 +498,12 @@ async function run() {
   );
   console.log(`  Pickup:        ${pickupSummary}`);
   console.log('='.repeat(50));
+
+  // Heartbeat only on a clean run — a failing run must NOT ping, so the
+  // monitor's missed-ping alert also fires when every run is erroring.
+  if (combinedErrors === 0) {
+    await sendHeartbeat();
+  }
 
   process.exit(combinedErrors > 0 ? 1 : 0);
 }
