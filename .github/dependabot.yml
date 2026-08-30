@@ -2,15 +2,15 @@
 
 version: 2
 updates:
-  - package-ecosystem: gitsubmodule
+  - package-ecosystem: github-actions
     rebase-strategy: 'auto'
     directory: '/'
     schedule:
       interval: 'daily'
     open-pull-requests-limit: 1
     commit-message:
-      prefix: 'chore'
-      prefix-development: 'chore'
+      prefix: 'ci'
+      prefix-development: 'ci'
       include: 'scope'
     labels:
       - 'dependencies'
@@ -31,8 +31,3 @@ updates:
     groups:
       development-dependencies:
         dependency-type: 'development'
-    ignore:
-      - dependency-name: '*'
-        versions: ['version-update:semver-major']
-      - dependency-name: 'typescript' # This is likely to conflict with peer dependencies and stop the whole dependency update process
-        versions: ['*']
