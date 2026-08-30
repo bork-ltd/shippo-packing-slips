@@ -207,6 +207,80 @@ export async function fetchPickupDetails(
   }
 }
 
+export type TransactionOrderInfo = {
+  orderNumber?: string;
+  orderObjectId?: string;
+  recipientName?: string;
+};
+
+/**
+ * Best-effort lookup of the order a label transaction belongs to.
+ * The SDK strips the order → transactions linkage (order.transactions items
+ * parse to empty objects), so this pages the raw /orders endpoint newest-first
+ * and matches the transaction object ID. The endpoint cannot filter by
+ * transaction, so the search is capped at a few pages of recent orders.
+ * @param transactionId - The Shippo transaction object ID
+ * @returns Order number, object ID, and recipient name; or undefined when no
+ *   recent order references the transaction
+ */
+export async function fetchOrderForTransaction(
+  transactionId: string,
+): Promise<TransactionOrderInfo | undefined> {
+  const apiToken = process.env.SHIPPO_API_TOKEN;
+  if (!apiToken) {
+    throw new Error('SHIPPO_API_TOKEN environment variable is required');
+  }
+
+  type RawOrder = {
+    object_id?: string;
+    order_number?: string;
+    to_address?: { name?: string };
+    transactions?: { object_id?: string }[];
+  };
+
+  const maxPages = 3;
+  try {
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await fetch(
+        `https://api.goshippo.com/orders?results=25&page=${page}`,
+        { headers: { Authorization: `ShippoToken ${apiToken}` } },
+      );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      }
+      const data = (await res.json()) as {
+        next?: string | null;
+        results?: RawOrder[];
+      };
+
+      for (const order of data.results ?? []) {
+        const match = order.transactions?.some(
+          (tx) => tx.object_id === transactionId,
+        );
+        if (match) {
+          return {
+            orderNumber: order.order_number,
+            orderObjectId: order.object_id,
+            recipientName: order.to_address?.name,
+          };
+        }
+      }
+
+      if (!data.next) {
+        break;
+      }
+    }
+    return undefined;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(
+        `Failed to fetch order for transaction: ${error.message}`,
+      );
+    }
+    throw new Error('Failed to fetch order for transaction: Unknown error');
+  }
+}
+
 /**
  * Resolve the recipient (ship-to) name for a transaction.
  * Walks the chain: transaction → rate → shipment → address_to.

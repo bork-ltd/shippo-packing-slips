@@ -12,11 +12,13 @@ import { validatePickupConfig } from './lib/validate-pickup-config';
 import { generatePackingSlip } from './services/pdf-generator';
 import { printPDF } from './services/printer';
 import {
+  fetchOrderForTransaction,
   fetchOrders,
   fetchPickupDetails,
   fetchRecipientName,
   fetchTransactions,
   schedulePickup,
+  type TransactionOrderInfo,
 } from './services/shippo';
 import { sendSlackNotification } from './services/slack';
 
@@ -122,6 +124,10 @@ async function runPackingSlipsJob(
             orderNumber,
             orderObjectId: order.objectId,
             recipientName: order.toAddress?.name ?? undefined,
+            totalItems: (order.lineItems ?? []).reduce(
+              (sum, item) => sum + (item.quantity ?? 0),
+              0,
+            ),
           }),
         );
       } catch (error) {
@@ -265,21 +271,33 @@ async function runLabelsJob(
           printedTransactionIds.push(tx.objectId);
         }
 
-        // Best-effort recipient lookup for the notification; a lookup failure
-        // must not count against the label run.
-        let recipientName: string | undefined;
+        // Best-effort order/recipient lookup for the notification; a lookup
+        // failure must not count against the label run.
+        let orderInfo: TransactionOrderInfo | undefined;
         if (tx.objectId) {
           try {
-            recipientName = await fetchRecipientName(tx.objectId);
+            orderInfo = await fetchOrderForTransaction(tx.objectId);
           } catch (lookupError) {
             console.warn(
               `  Warning: ${lookupError instanceof Error ? lookupError.message : String(lookupError)}`,
             );
           }
+          if (!orderInfo?.recipientName) {
+            try {
+              const recipientName = await fetchRecipientName(tx.objectId);
+              orderInfo = { ...orderInfo, recipientName };
+            } catch (lookupError) {
+              console.warn(
+                `  Warning: ${lookupError instanceof Error ? lookupError.message : String(lookupError)}`,
+              );
+            }
+          }
         }
         await sendSlackNotification(
           formatLabelPrintedMessage({
-            recipientName,
+            orderNumber: orderInfo?.orderNumber,
+            orderObjectId: orderInfo?.orderObjectId,
+            recipientName: orderInfo?.recipientName,
             trackingNumber: tx.trackingNumber,
           }),
         );
