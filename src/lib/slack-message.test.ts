@@ -5,6 +5,7 @@ import {
   formatErrorMessage,
   formatLabelPrintedMessage,
   formatPackingSlipPrintedMessage,
+  formatRunLogContext,
   shippoOrderUrl,
 } from './slack-message';
 
@@ -204,6 +205,7 @@ describe('formatErrorMessage', () => {
     const message = formatErrorMessage(
       'Failed to process order 1234',
       'HTTP 500',
+      { timestamp: '2026-06-09T04:30:00.000Z' },
     );
     expect(message.text).toBe('Failed to process order 1234: HTTP 500');
     expect(message.blocks).toEqual([
@@ -212,6 +214,7 @@ describe('formatErrorMessage', () => {
         width: 'standard',
         has_header_divider: true,
         title: { type: 'plain_text', text: 'Error' },
+        subtitle: { type: 'plain_text', text: '2026-06-09T04:30:00.000Z' },
         icon: {
           type: 'image',
           image_url:
@@ -237,9 +240,24 @@ describe('formatErrorMessage', () => {
     ]);
   });
 
-  it('has no subtitle', () => {
+  it('defaults the subtitle to the current time in ISO 8601 when no timestamp is given', () => {
     const message = formatErrorMessage('Fatal error', 'boom');
-    expect(container(message).subtitle).toBeUndefined();
+    expect(container(message).subtitle?.text).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    );
+  });
+
+  it('appends the log context below the error when provided', () => {
+    const message = formatErrorMessage('Fatal error', 'boom', {
+      timestamp: '2026-06-09T04:30:00.000Z',
+      logContext: 'Date range (2x lookback window):\n  Start: x\n  End:   y',
+    });
+    const callout = container(message).child_blocks[0] as unknown as {
+      child_blocks: { text: { text: string } }[];
+    };
+    expect(callout.child_blocks[0].text.text).toBe(
+      '```Fatal error\nboom\n\nDate range (2x lookback window):\n  Start: x\n  End:   y```',
+    );
   });
 
   it('escapes mrkdwn characters inside the code block', () => {
@@ -285,5 +303,31 @@ describe('formatErrorMessage', () => {
       child_blocks: { text: { text: string } }[];
     };
     expect(callout.child_blocks[0].text.text).toBe('```E\nshort detail```');
+  });
+});
+
+describe('formatRunLogContext', () => {
+  it('renders the Date range and Summary blocks exactly as cron.log does', () => {
+    const text = formatRunLogContext({
+      startDate: new Date('2026-06-09T04:00:00.000Z'),
+      endDate: new Date('2026-06-09T05:00:00.000Z'),
+      packingSlips: { success: 1, skipped: 2, errors: 0 },
+      labels: { success: 3, skipped: 0, errors: 1 },
+      pickupSummary: 'scheduled (confirmation: abc123)',
+    });
+    expect(text).toBe(
+      [
+        'Date range (2x lookback window):',
+        '  Start: 2026-06-09T04:00:00.000Z',
+        '  End:   2026-06-09T05:00:00.000Z',
+        '',
+        '='.repeat(50),
+        'Summary:',
+        '  Packing slips: 1 printed, 2 skipped (lookback), 0 errors',
+        '  Labels:        3 downloaded, 0 skipped (lookback), 1 errors',
+        '  Pickup:        scheduled (confirmation: abc123)',
+        '='.repeat(50),
+      ].join('\n'),
+    );
   });
 });
