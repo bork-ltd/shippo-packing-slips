@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type PDFKit from 'pdfkit';
 import PDFDocument from 'pdfkit';
 import type { Order } from 'shippo/models/components';
 
@@ -59,7 +58,12 @@ export async function generatePackingSlip(
   return new Promise((resolve, reject) => {
     try {
       // Create PDF document with 4x6 dimensions
+      // font: false skips PDFKit's eager default-font init, which otherwise requires
+      // pdfkit's own '#standard-fonts/Helvetica' subpath import — unresolvable once
+      // ncc bundles this into a single file with no pdfkit package.json alongside it.
       const doc = new PDFDocument({
+        // @ts-expect-error @types/pdfkit@0.17.4 types `font` as string-only; pdfkit@0.20.1 accepts false
+        font: false,
         margin: MARGIN,
         size: [PAGE_WIDTH, PAGE_HEIGHT],
       });
