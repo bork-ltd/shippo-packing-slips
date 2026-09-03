@@ -6,17 +6,30 @@ A single Node.js script that runs on a schedule via cron on a Raspberry Pi Zero 
 
 ## What It Does
 
-Each cron run performs three jobs over a **2x lookback window** (default: last 2 × 60 minutes):
+Each cron run performs three jobs over a **fetch window per job** — normally the last 2 × `CRON_TIME_WINDOW_MINUTES`, widened when either job's last successful fetch is older than that (see [Resilience to outages](#resilience-to-outages)):
 
-1. **Packing slips** — Fetch PAID orders from Shippo → check sentinel *(skip + delete if found)* → generate PDF → print via `lp` → leave file on disk as sentinel
-2. **Shipping labels** — Fetch shipments with Shippo labels → check sentinel *(skip + delete if found)* → download label PDF → print via `lp` → leave file on disk as sentinel
+1. **Packing slips** — Fetch orders from Shippo (server-side `PAID` filter, unless `INCLUDE_ALL_ORDER_STATUSES=true`; client-side exclusion of `SHIPPED`/`PARTIALLY_FULFILLED`/`CANCELLED`/`REFUNDED` always applies) → check print marker *(skip if found)* → generate PDF → print via `lp` → record print marker
+2. **Shipping labels** — Fetch transactions with Shippo labels not yet scanned by the carrier (`trackingStatus` is `PRE_TRANSIT`, `UNKNOWN`, or absent) → check print marker *(skip if found)* → download label PDF → print via `lp` → record print marker
 3. **USPS pickup scheduling** — If any new labels were printed this run, resolve the pickup address and carrier account from Shippo and schedule a single pickup for all of them, with a window from tomorrow 08:00 UTC through D+4 18:00 UTC — wide enough to guarantee the next business day falls within it even across a 3-day holiday weekend
 
-Temp files are written to `/tmp`. Files from the prior window are cleaned up when encountered as already-printed sentinels on the current run.
+PDFs are written to `/tmp` only as scratch space for `lp` and deleted right after a successful print; the durable dedup record is a marker file in the persistent state directory (see below), not the PDF's presence.
 
 ## Design Principles
 
-The script is intentionally stateless — no database, no state file, no external tracking store. Deduplication is achieved using the PDF files already written to `/tmp` as ephemeral sentinels. No additional infrastructure is required.
+The script has never been fully stateless — the `/tmp` sentinel-file dedup below predates this document — and now explicitly keeps two small pieces of durable state instead: a **fetch watermark** per job (last successful fetch time, for outage recovery) and a **print marker** per item (dedup), both under one directory, still no database. Order/label **status** is the outermost safety net: it is checked on every fetch regardless of state, so even a total loss of the state directory cannot reprint something Shippo already reports as shipped, cancelled, refunded, or in the carrier's hands.
+
+## Persistent state directory
+
+Configurable via `STATE_DIR`; defaults to `~/.shippo-state` on the Pi user's home directory (not `/tmp`, which is tmpfs and clears on reboot — see [Resilience to outages](#resilience-to-outages) for why that matters). See `src/services/state-store.ts`.
+
+| Path | Purpose |
+|---|---|
+| `orders-last-fetch` | ISO-8601 timestamp of the packing-slips job's last successful fetch |
+| `labels-last-fetch` | same, for the labels job |
+| `printed/<key>` | zero-byte marker per printed slip/label, keyed by `<kind>-<date>-<id>` (`src/lib/sentinel-key.ts`) |
+| `pickup-requested-YYYY-MM-DD` | daily pickup sentinel |
+
+A sweep on every run (`sweepState`) deletes markers and the pickup sentinel older than `MAX_LOOKBACK_MINUTES` (they can never be relevant again — the fetch window can never widen past that cap), and any `/tmp` packing-slip/label PDF older than an hour (a stale leftover from a run whose marker write failed).
 
 ## Deduplication
 
@@ -24,24 +37,33 @@ The script is intentionally stateless — no database, no state file, no externa
 
 Orders near a cron window boundary may not yet be `PAID` (or not yet synced to the Shippo API) when the cron fires. The next run's window has moved forward and no longer covers that order's timestamp — it is permanently missed.
 
-### Solution: 2x lookback + sentinel files
+### Solution: 2x lookback + print markers
 
-Both jobs query a **2x window** (e.g., last 2 hours for a 60-minute cron). On each run:
+Both jobs query at least a **2x window** (e.g., last 2 hours for a 60-minute cron). On each run:
 
-- If the PDF file for an item already exists in `/tmp`, it was printed in the previous run → skip it and delete the sentinel
-- If the file does not exist, print it and leave the file on disk for the next run to detect
+- If a print marker for an item already exists, it was printed in a previous run → skip it
+- If not, print it and record the marker
 
 Under normal operation, this ensures every item in the trailing window gets a second chance to be processed without reprinting items that already went through.
+
+## Resilience to outages
+
+The 2x window alone only survives **one** missed run — two consecutive fetch failures permanently lose anything that falls out of the window before a run succeeds again. Each job instead tracks its own last-successful-fetch watermark (`orders-last-fetch` / `labels-last-fetch`). On every run, the window starts at the earlier of the normal 2x boundary and that watermark, capped at `MAX_LOOKBACK_MINUTES` (default 7 days) so a very long outage can't trigger an unbounded catch-up fetch — see `calculateFetchWindow` in `src/lib/time-window.ts`.
+
+There is deliberately **no in-process retry with backoff**. Cron already fires every `CRON_TIME_WINDOW_MINUTES`, and that's the retry; a failed fetch does not send a Slack alert either, since that would fire on every tick of an outage — the `HEALTHCHECK_PING_URL` dead-man's-switch (skipped on any failing run) is the single source of truth for "something is down." A failed fetch leaves its watermark unchanged, so the very next run's window widens automatically once the outage clears.
+
+Because the widened window can pull in items well outside a normal 2x reprint radius, the status filters described in [What It Does](#what-it-does) are load-bearing here: they are what stops a multi-day catch-up from reprinting a slip for an order that shipped last week, or a label whose package the carrier has already scanned.
 
 ### Trade-offs and edge cases
 
 | Scenario | Behavior |
 |---|---|
-| Pi reboots between print run and cleanup run | `/tmp` is tmpfs and is cleared on reboot; items in the lookback zone may reprint once — acceptable trade-off for stateless operation |
-| `printPDF` fails after file write succeeds | Sentinel may or may not be on disk depending on whether the write completed before the error; next run skips if found, retries if not — consistent with existing no-retry behavior |
-| Manual re-run within same window | Second run finds sentinels, skips all — correct |
-| Order cancelled before lookback cleanup | Not returned by API; sentinel sits in `/tmp` until OS cleans it — benign |
-| Label download fails partway | No sentinel left (write failed); next run retries — correct |
+| Pi reboots mid-run | `/tmp` PDFs are lost (tmpfs), but print markers and fetch watermarks live in the persistent state directory and survive — nothing reprints solely because of a reboot |
+| `printPDF` fails after the PDF was written | No print marker was recorded; next run retries — consistent with existing no-retry behavior |
+| Manual re-run within same window | Second run finds the print markers, skips all — correct |
+| Order cancelled before lookback cleanup | Excluded by the terminal-status filter regardless of markers |
+| Label download fails partway | No print marker recorded (write failed); next run retries — correct |
+| A job's fetch fails for longer than `MAX_LOOKBACK_MINUTES` | Orders/labels older than the cap are not automatically recovered — reconcile manually via the Shippo dashboard |
 
 ## Stack
 
@@ -54,11 +76,17 @@ Under normal operation, this ensures every item in the trailing window gets a se
 
 ```
 src/
-  index.ts           ← single entry point, orchestrates all three jobs
+  index.ts               ← single entry point, orchestrates all three jobs
   lib/
-    pdf-generator.ts ← generatePackingSlip()
-    printer.ts       ← printPDF() via CUPS lp command
-    shippo.ts        ← fetchOrders(), fetchTransactions(), fetchPickupDetails(), schedulePickup()
+    time-window.ts       ← calculateTimeWindow(), calculateFetchWindow()
+    filter-order.ts       ← isTerminalOrderStatus()
+    filter-transaction.ts ← filterTransaction() (date window + carrier-scan status)
+    sentinel-key.ts       ← buildSentinelKey()
+  services/
+    pdf-generator.ts     ← generatePackingSlip()
+    printer.ts           ← printPDF() via CUPS lp command
+    shippo.ts            ← fetchOrders(), fetchTransactions(), fetchPickupDetails(), schedulePickup()
+    state-store.ts        ← fetch watermarks, print markers, sweepState()
 ```
 
 
@@ -189,11 +217,14 @@ COMPANY_NAME=...
 ```
 
 See `.env.example` for all available variables, including the optional
-`SLACK_WEBHOOK_URL` (per-print and per-error notifications) and
+`SLACK_WEBHOOK_URL` (per-print and per-error notifications — never sent for a
+fetch failure specifically, see [Resilience to outages](#resilience-to-outages)),
 `HEALTHCHECK_PING_URL` (dead-man's-switch pinged on successful runs; set the
 monitor's period to match `CRON_TIME_WINDOW_MINUTES` plus a few minutes of
 grace so a missed ping alerts when the Pi is offline or hung without
-false-alarming on a single transient blip).
+false-alarming on a single transient blip), `MAX_LOOKBACK_MINUTES` (cap on how
+far a widened fetch window can reach back, default 7 days), and `STATE_DIR`
+(persistent state directory, default `~/.shippo-state`).
 
 ## Printer
 

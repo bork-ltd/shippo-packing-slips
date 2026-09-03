@@ -9,6 +9,7 @@ I/O-bound modules used by `src/index.ts`. All modules here interact with externa
 - `shippo.ts` — `fetchOrders()`, `fetchTransactions()`, `fetchPickupDetails()`, `fetchOrderForTransaction()`, `fetchRecipientName()`, `schedulePickup()` — Shippo API calls; requires `SHIPPO_API_TOKEN` env var. See JSDoc in `shippo.ts` for function-level details. `fetchOrderForTransaction` uses the raw HTTP API because the SDK strips the order → transactions linkage.
 - `slack.ts` — `sendSlackNotification(message)` — posts a `SlackMessage` payload (built by the `src/lib/slack-message.ts` formatters) to the Slack incoming webhook in `SLACK_WEBHOOK_URL`; silent no-op when unset, never throws
 - `healthcheck.ts` — `sendHeartbeat()` — pings the dead-man's-switch URL in `HEALTHCHECK_PING_URL`; called only on a clean run (`src/index.ts` exit-0 path); silent no-op when unset, never throws
+- `state-store.ts` — `getStateDir()`, `readLastFetch()`/`writeLastFetch()` (per-job fetch watermark), `hasPrintMarker()`/`writePrintMarker()` (per-item print marker), `sweepState()` (TTL cleanup); persists under `STATE_DIR` (default `~/.shippo-state`), not `/tmp` — see `docs/ARCHITECTURE.md`
 
 ## Printer notes
 
@@ -21,3 +22,5 @@ I/O-bound modules used by `src/index.ts`. All modules here interact with externa
 ## Adding new modules
 
 Any new file here should interact with external systems. Pure logic extracted from a service belongs in `src/lib/` instead.
+
+`state-store.ts` is the one exception with a co-located `.test.ts`: it only touches the local filesystem (no external API), so it is cheap and safe to unit-test directly against a temp directory rather than deferring to integration tests.

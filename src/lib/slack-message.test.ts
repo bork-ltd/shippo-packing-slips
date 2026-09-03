@@ -309,17 +309,23 @@ describe('formatErrorMessage', () => {
 describe('formatRunLogContext', () => {
   it('renders the Date range and Summary blocks exactly as cron.log does', () => {
     const text = formatRunLogContext({
-      startDate: new Date('2026-06-09T04:00:00.000Z'),
-      endDate: new Date('2026-06-09T05:00:00.000Z'),
+      ordersWindow: {
+        startDate: new Date('2026-06-09T04:00:00.000Z'),
+        endDate: new Date('2026-06-09T05:00:00.000Z'),
+      },
+      labelsWindow: {
+        startDate: new Date('2026-06-09T04:00:00.000Z'),
+        endDate: new Date('2026-06-09T05:00:00.000Z'),
+      },
       packingSlips: { success: 1, skipped: 2, errors: 0 },
       labels: { success: 3, skipped: 0, errors: 1 },
       pickupSummary: 'scheduled (confirmation: abc123)',
     });
     expect(text).toBe(
       [
-        'Date range (2x lookback window):',
-        '  Start: 2026-06-09T04:00:00.000Z',
-        '  End:   2026-06-09T05:00:00.000Z',
+        'Date range:',
+        '  Packing slips: 2026-06-09T04:00:00.000Z to 2026-06-09T05:00:00.000Z',
+        '  Labels:        2026-06-09T04:00:00.000Z to 2026-06-09T05:00:00.000Z',
         '',
         '='.repeat(50),
         'Summary:',
@@ -328,6 +334,28 @@ describe('formatRunLogContext', () => {
         '  Pickup:        scheduled (confirmation: abc123)',
         '='.repeat(50),
       ].join('\n'),
+    );
+  });
+
+  it('renders differing packing-slip and label ranges when only one job widened', () => {
+    const text = formatRunLogContext({
+      ordersWindow: {
+        startDate: new Date('2026-06-06T04:00:00.000Z'),
+        endDate: new Date('2026-06-09T05:00:00.000Z'),
+      },
+      labelsWindow: {
+        startDate: new Date('2026-06-09T04:00:00.000Z'),
+        endDate: new Date('2026-06-09T05:00:00.000Z'),
+      },
+      packingSlips: { success: 0, skipped: 0, errors: 0 },
+      labels: { success: 0, skipped: 0, errors: 0 },
+      pickupSummary: 'not scheduled (no new labels this run)',
+    });
+    expect(text).toContain(
+      '  Packing slips: 2026-06-06T04:00:00.000Z to 2026-06-09T05:00:00.000Z',
+    );
+    expect(text).toContain(
+      '  Labels:        2026-06-09T04:00:00.000Z to 2026-06-09T05:00:00.000Z',
     );
   });
 });

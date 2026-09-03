@@ -31,16 +31,19 @@ describe('isDuplicatePickupError', () => {
 });
 
 describe('pickupSentinelPath', () => {
-  it('builds the path from the UTC date', () => {
-    expect(pickupSentinelPath(new Date('2026-08-30T23:45:09.152Z'))).toBe(
-      '/tmp/pickup-requested-2026-08-30',
-    );
+  it('builds the path from the UTC date under the given state dir', () => {
+    expect(
+      pickupSentinelPath(
+        new Date('2026-08-30T23:45:09.152Z'),
+        '/home/bje/.shippo-state',
+      ),
+    ).toBe('/home/bje/.shippo-state/pickup-requested-2026-08-30');
   });
 
   it('uses the UTC date, not local time', () => {
     // 23:45 UTC on Aug 30 is Aug 31 in UTC+2, but the path must stay UTC.
-    expect(pickupSentinelPath(new Date('2026-08-31T00:10:00.000Z'))).toBe(
-      '/tmp/pickup-requested-2026-08-31',
-    );
+    expect(
+      pickupSentinelPath(new Date('2026-08-31T00:10:00.000Z'), '/tmp/state'),
+    ).toBe('/tmp/state/pickup-requested-2026-08-31');
   });
 });

@@ -27,7 +27,7 @@ See `README.md` for repository overview and contents.
 
 - `reference/example-shippo-packing-slip.pdf` - Example of Shippo's default packing slip format
 
-See `ARCHITECTURE.md` for detailed integration strategy.
+See `docs/ARCHITECTURE.md` for detailed integration strategy.
 
 ## Requirements
 

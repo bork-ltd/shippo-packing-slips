@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { calculateTimeWindow } from './time-window';
+import { calculateFetchWindow, calculateTimeWindow } from './time-window';
 
 describe('calculateTimeWindow', () => {
   describe('valid input', () => {
@@ -77,5 +77,68 @@ describe('calculateTimeWindow', () => {
     it('includes the bad value in the error message', () => {
       expect(() => calculateTimeWindow(new Date(), 7)).toThrow('7');
     });
+  });
+});
+
+describe('calculateFetchWindow', () => {
+  const now = new Date('2026-01-10T10:45:00.000Z');
+  // baseline for (now, 60): endDate 10:00:00Z, startDate 08:00:00Z
+
+  it('returns the baseline window when lastFetch is null', () => {
+    const { startDate, endDate } = calculateFetchWindow(now, 60, null, 10080);
+    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+    expect(endDate.toISOString()).toBe('2026-01-10T10:00:00.000Z');
+  });
+
+  it('returns the baseline window when lastFetch is inside it', () => {
+    const lastFetch = new Date('2026-01-10T09:00:00.000Z');
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 10080);
+    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+  });
+
+  it('returns the baseline window when lastFetch equals baseline startDate', () => {
+    const lastFetch = new Date('2026-01-10T08:00:00.000Z');
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 10080);
+    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+  });
+
+  it('returns the baseline window when lastFetch is in the future', () => {
+    const lastFetch = new Date('2026-01-10T12:00:00.000Z');
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 10080);
+    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+  });
+
+  it('widens startDate to lastFetch when older than the baseline', () => {
+    const lastFetch = new Date('2026-01-10T05:00:00.000Z');
+    const { startDate, endDate } = calculateFetchWindow(
+      now,
+      60,
+      lastFetch,
+      10080,
+    );
+    expect(startDate.toISOString()).toBe('2026-01-10T05:00:00.000Z');
+    expect(endDate.toISOString()).toBe('2026-01-10T10:00:00.000Z');
+  });
+
+  it('clamps startDate to the maxLookbackMinutes cap', () => {
+    const lastFetch = new Date('2025-12-01T00:00:00.000Z'); // ~40 days back
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 10080); // 7-day cap
+    expect(startDate.toISOString()).toBe('2026-01-03T10:00:00.000Z');
+  });
+
+  it('throws RangeError for a non-positive maxLookbackMinutes', () => {
+    expect(() => calculateFetchWindow(now, 60, null, 0)).toThrow(RangeError);
+  });
+
+  it('throws RangeError for a non-integer maxLookbackMinutes', () => {
+    expect(() => calculateFetchWindow(now, 60, null, 1.5)).toThrow(RangeError);
+  });
+
+  it('throws RangeError for NaN maxLookbackMinutes', () => {
+    expect(() => calculateFetchWindow(now, 60, null, NaN)).toThrow(RangeError);
+  });
+
+  it('propagates RangeError from calculateTimeWindow for an invalid timeWindowMinutes', () => {
+    expect(() => calculateFetchWindow(now, 7, null, 10080)).toThrow(RangeError);
   });
 });

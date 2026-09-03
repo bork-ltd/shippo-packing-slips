@@ -1,4 +1,5 @@
 import type { Transaction } from 'shippo/models/components';
+import { TrackingStatusEnum } from 'shippo/models/components';
 import { describe, expect, it } from 'vitest';
 
 import { filterTransaction } from './filter-transaction';
@@ -9,8 +10,9 @@ const endDate = new Date('2026-01-01T11:00:00.000Z');
 function makeTx(
   objectCreated: Date | undefined,
   labelUrl?: string,
+  trackingStatus?: TrackingStatusEnum,
 ): Transaction {
-  return { objectCreated, labelUrl } as unknown as Transaction;
+  return { objectCreated, labelUrl, trackingStatus } as unknown as Transaction;
 }
 
 describe('filterTransaction', () => {
@@ -47,6 +49,33 @@ describe('filterTransaction', () => {
       const tx = makeTx(new Date(endDate), 'http://label.url');
       expect(filterTransaction(tx, startDate, endDate)).toBe('match');
     });
+
+    it('returns match when trackingStatus is PRE_TRANSIT', () => {
+      const tx = makeTx(
+        new Date('2026-01-01T10:30:00.000Z'),
+        'http://label.url',
+        TrackingStatusEnum.PreTransit,
+      );
+      expect(filterTransaction(tx, startDate, endDate)).toBe('match');
+    });
+
+    it('returns match when trackingStatus is UNKNOWN', () => {
+      const tx = makeTx(
+        new Date('2026-01-01T10:30:00.000Z'),
+        'http://label.url',
+        TrackingStatusEnum.Unknown,
+      );
+      expect(filterTransaction(tx, startDate, endDate)).toBe('match');
+    });
+
+    it('returns match when trackingStatus is absent', () => {
+      const tx = makeTx(
+        new Date('2026-01-01T10:30:00.000Z'),
+        'http://label.url',
+        undefined,
+      );
+      expect(filterTransaction(tx, startDate, endDate)).toBe('match');
+    });
   });
 
   describe("'skip'", () => {
@@ -80,6 +109,20 @@ describe('filterTransaction', () => {
 
     it('returns skip when created is undefined', () => {
       const tx = makeTx(undefined, 'http://label.url');
+      expect(filterTransaction(tx, startDate, endDate)).toBe('skip');
+    });
+
+    it.each([
+      TrackingStatusEnum.Transit,
+      TrackingStatusEnum.Delivered,
+      TrackingStatusEnum.Returned,
+      TrackingStatusEnum.Failure,
+    ])('returns skip when trackingStatus is %s', (trackingStatus) => {
+      const tx = makeTx(
+        new Date('2026-01-01T10:30:00.000Z'),
+        'http://label.url',
+        trackingStatus,
+      );
       expect(filterTransaction(tx, startDate, endDate)).toBe('skip');
     });
   });

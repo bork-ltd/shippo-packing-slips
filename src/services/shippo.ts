@@ -83,10 +83,9 @@ export async function fetchOrders(
     return allOrders;
   } catch (error) {
     // Re-throw with more context
-    if (error instanceof Error) {
-      throw new Error(`Failed to fetch orders from Shippo: ${error.message}`);
-    }
-    throw new Error('Failed to fetch orders from Shippo: Unknown error');
+    throw new Error(
+      `Failed to fetch orders from Shippo: ${describeFetchError(error)}`,
+    );
   }
 }
 
@@ -137,13 +136,25 @@ export async function fetchTransactions(
 
     return matched;
   } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(
-        `Failed to fetch transactions from Shippo: ${error.message}`,
-      );
-    }
-    throw new Error('Failed to fetch transactions from Shippo: Unknown error');
+    throw new Error(
+      `Failed to fetch transactions from Shippo: ${describeFetchError(error)}`,
+    );
   }
+}
+
+/**
+ * Describe a caught error, unwrapping undici's network-error cause.
+ * undici surfaces network failures (DNS, connection refused, etc.) as a bare
+ * "TypeError: fetch failed" with the actual cause (ENOTFOUND, ECONNREFUSED, ...)
+ * on error.cause — without unwrapping it, logs and alerts say nothing useful.
+ */
+function describeFetchError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.cause instanceof Error
+      ? `${error.message} (${error.cause.message})`
+      : error.message;
+  }
+  return 'Unknown error';
 }
 
 /**
