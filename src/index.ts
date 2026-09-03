@@ -10,6 +10,7 @@ import {
   formatErrorMessage,
   formatLabelPrintedMessage,
   formatPackingSlipPrintedMessage,
+  formatRunLogContext,
 } from './lib/slack-message';
 import { calculateTimeWindow } from './lib/time-window';
 import { validatePickupConfig } from './lib/validate-pickup-config';
@@ -31,11 +32,24 @@ import { sendSlackNotification } from './services/slack';
 dotenv.config();
 dotenv.config({ override: true, path: '.env.local' });
 
+/**
+ * An error notification queued during a job. Sent only after the run's
+ * Summary block is known, so `formatErrorMessage` can attach the same
+ * "Date range" and "Summary" context that lands in cron.log.
+ */
+type QueuedError = { context: string; detail: string; timestamp: string };
+
 async function runPackingSlipsJob(
   startDate: Date,
   endDate: Date,
-): Promise<{ success: number; errors: number; skipped: number }> {
+): Promise<{
+  success: number;
+  errors: number;
+  skipped: number;
+  errorNotifications: QueuedError[];
+}> {
   console.log('Fetching orders and generating packing slips...');
+  const errorNotifications: QueuedError[] = [];
 
   const statusFilter =
     process.env.INCLUDE_ALL_ORDER_STATUSES === 'true'
@@ -47,7 +61,7 @@ async function runPackingSlipsJob(
 
     if (orders.length === 0) {
       console.log('No orders found in the specified date range.\n');
-      return { success: 0, errors: 0, skipped: 0 };
+      return { success: 0, errors: 0, skipped: 0, errorNotifications };
     }
 
     console.log(`✓ Found ${orders.length} order(s)\n`);
@@ -136,12 +150,11 @@ async function runPackingSlipsJob(
         }
         console.log('');
         errorCount++;
-        await sendSlackNotification(
-          formatErrorMessage(
-            `Failed to process order ${orderNumber}`,
-            error instanceof Error ? error.message : String(error),
-          ),
-        );
+        errorNotifications.push({
+          context: `Failed to process order ${orderNumber}`,
+          detail: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
         continue;
       }
 
@@ -160,7 +173,12 @@ async function runPackingSlipsJob(
       );
     }
 
-    return { success: successCount, errors: errorCount, skipped: skippedCount };
+    return {
+      success: successCount,
+      errors: errorCount,
+      skipped: skippedCount,
+      errorNotifications,
+    };
   } catch (error) {
     console.error('✗ Failed to fetch or process orders\n');
     if (error instanceof Error) {
@@ -168,13 +186,12 @@ async function runPackingSlipsJob(
     } else {
       console.error('Error:', error);
     }
-    await sendSlackNotification(
-      formatErrorMessage(
-        'Packing slips job failed',
-        error instanceof Error ? error.message : String(error),
-      ),
-    );
-    return { success: 0, errors: 1, skipped: 0 };
+    errorNotifications.push({
+      context: 'Packing slips job failed',
+      detail: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
+    return { success: 0, errors: 1, skipped: 0, errorNotifications };
   }
 }
 
@@ -186,15 +203,23 @@ async function runLabelsJob(
   errors: number;
   skipped: number;
   printedTransactionIds: string[];
+  errorNotifications: QueuedError[];
 }> {
   console.log('Fetching transactions and downloading labels...');
+  const errorNotifications: QueuedError[] = [];
 
   try {
     const transactions = await fetchTransactions(startDate, endDate);
 
     if (transactions.length === 0) {
       console.log('No labels found in the specified date range.\n');
-      return { success: 0, errors: 0, skipped: 0, printedTransactionIds: [] };
+      return {
+        success: 0,
+        errors: 0,
+        skipped: 0,
+        printedTransactionIds: [],
+        errorNotifications,
+      };
     }
 
     console.log(`✓ Found ${transactions.length} label(s)\n`);
@@ -291,12 +316,11 @@ async function runLabelsJob(
         }
         console.log('');
         errorCount++;
-        await sendSlackNotification(
-          formatErrorMessage(
-            `Failed to process label for transaction ${objectId}`,
-            error instanceof Error ? error.message : String(error),
-          ),
-        );
+        errorNotifications.push({
+          context: `Failed to process label for transaction ${objectId}`,
+          detail: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
         continue;
       }
 
@@ -339,6 +363,7 @@ async function runLabelsJob(
       errors: errorCount,
       skipped: skippedCount,
       printedTransactionIds,
+      errorNotifications,
     };
   } catch (error) {
     console.error('✗ Failed to fetch or process labels\n');
@@ -347,13 +372,18 @@ async function runLabelsJob(
     } else {
       console.error('Error:', error);
     }
-    await sendSlackNotification(
-      formatErrorMessage(
-        'Labels job failed',
-        error instanceof Error ? error.message : String(error),
-      ),
-    );
-    return { success: 0, errors: 1, skipped: 0, printedTransactionIds: [] };
+    errorNotifications.push({
+      context: 'Labels job failed',
+      detail: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
+    return {
+      success: 0,
+      errors: 1,
+      skipped: 0,
+      printedTransactionIds: [],
+      errorNotifications,
+    };
   }
 }
 
@@ -505,6 +535,14 @@ async function run() {
 
   const combinedErrors = slipResults.errors + labelResults.errors;
 
+  // Error notifications queued by the jobs above are sent once the Summary
+  // block below is known, so each one can carry the same "Date range" and
+  // "Summary" context that lands in cron.log.
+  const pendingErrorNotifications: QueuedError[] = [
+    ...slipResults.errorNotifications,
+    ...labelResults.errorNotifications,
+  ];
+
   let pickupSummary: string;
   if (labelResults.printedTransactionIds.length === 0) {
     pickupSummary = 'not scheduled (no new labels this run)';
@@ -522,12 +560,11 @@ async function run() {
     pickupSummary = `scheduled${confirmation}${window}`;
   } else {
     pickupSummary = `FAILED — ${pickupResult.error}`;
-    await sendSlackNotification(
-      formatErrorMessage(
-        'Pickup scheduling failed',
-        pickupResult.error ?? 'Unknown error',
-      ),
-    );
+    pendingErrorNotifications.push({
+      context: 'Pickup scheduling failed',
+      detail: pickupResult.error ?? 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
   }
 
   console.log('='.repeat(50));
@@ -540,6 +577,30 @@ async function run() {
   );
   console.log(`  Pickup:        ${pickupSummary}`);
   console.log('='.repeat(50));
+
+  const logContext = formatRunLogContext({
+    startDate,
+    endDate,
+    packingSlips: {
+      success: slipResults.success,
+      skipped: slipResults.skipped,
+      errors: slipResults.errors,
+    },
+    labels: {
+      success: labelResults.success,
+      skipped: labelResults.skipped,
+      errors: labelResults.errors,
+    },
+    pickupSummary,
+  });
+  for (const notification of pendingErrorNotifications) {
+    await sendSlackNotification(
+      formatErrorMessage(notification.context, notification.detail, {
+        timestamp: notification.timestamp,
+        logContext,
+      }),
+    );
+  }
 
   // A pickup that should have been scheduled but wasn't is a run failure,
   // matching the Slack FAILED notification above. A pickup already requested

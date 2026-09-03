@@ -59,7 +59,7 @@ function mrkdwnSection(text: string): unknown {
  */
 function containerBlock(params: {
   title: string;
-  subtitle?: string;
+  subtitle: string;
   emojiCodepoint: string;
   emojiAltText: string;
   childBlocks: unknown[];
@@ -70,7 +70,7 @@ function containerBlock(params: {
     width: 'standard',
     has_header_divider: true,
     title: { type: 'plain_text', text: title },
-    ...(subtitle ? { subtitle: { type: 'plain_text', text: subtitle } } : {}),
+    subtitle: { type: 'plain_text', text: subtitle },
     icon: {
       type: 'image',
       image_url: `${TWEMOJI_URL_BASE}/${emojiCodepoint}.png`,
@@ -153,18 +153,62 @@ export function formatLabelPrintedMessage(params: {
 }
 
 /**
+ * Run-level counts and date range needed to reproduce the log's
+ * "Date range" and "Summary" blocks verbatim.
+ */
+export type RunSummary = {
+  startDate: Date;
+  endDate: Date;
+  packingSlips: { success: number; skipped: number; errors: number };
+  labels: { success: number; skipped: number; errors: number };
+  pickupSummary: string;
+};
+
+/**
+ * Render the "Date range" and "Summary" blocks exactly as they appear in
+ * cron.log, so error notifications can carry the same debugging context.
+ */
+export function formatRunLogContext(summary: RunSummary): string {
+  const divider = '='.repeat(50);
+  return [
+    'Date range (2x lookback window):',
+    `  Start: ${summary.startDate.toISOString()}`,
+    `  End:   ${summary.endDate.toISOString()}`,
+    '',
+    divider,
+    'Summary:',
+    `  Packing slips: ${summary.packingSlips.success} printed, ${summary.packingSlips.skipped} skipped (lookback), ${summary.packingSlips.errors} errors`,
+    `  Labels:        ${summary.labels.success} downloaded, ${summary.labels.skipped} skipped (lookback), ${summary.labels.errors} errors`,
+    `  Pickup:        ${summary.pickupSummary}`,
+    divider,
+  ].join('\n');
+}
+
+/**
  * Build the Slack message for an error: an "Error" container holding an
  * orange callout with the error output in a code block.
  * @param context - What was being attempted (e.g. "Failed to process order 1234")
  * @param detail - The error message
+ * @param options.timestamp - ISO timestamp of the failure, shown as the container
+ *   subtitle. Defaults to the current time (the Pi runs on UTC, so this doubles as
+ *   local device time).
+ * @param options.logContext - The run's "Date range" and "Summary" blocks
+ *   (see `formatRunLogContext`), appended below the error so the notification
+ *   carries the same debugging context as cron.log.
  */
 export function formatErrorMessage(
   context: string,
   detail: string,
+  options?: { timestamp?: string; logContext?: string },
 ): SlackMessage {
+  const timestamp = options?.timestamp ?? new Date().toISOString();
+  const rawContent = options?.logContext
+    ? `${context}\n${detail}\n\n${options.logContext}`
+    : `${context}\n${detail}`;
+
   // Escape before truncating: escaping only grows the string, so the limit
   // must be enforced on the escaped form.
-  let codeContent = escapeSlackText(`${context}\n${detail}`);
+  let codeContent = escapeSlackText(rawContent);
   const truncationMarker = '\n… (truncated)';
   // Leave room for the code fence markers within the section limit.
   const maxContent = SECTION_TEXT_LIMIT - 6;
@@ -180,6 +224,7 @@ export function formatErrorMessage(
     blocks: [
       containerBlock({
         title: 'Error',
+        subtitle: timestamp,
         emojiCodepoint: '1f6a8',
         emojiAltText: 'alert emoji',
         childBlocks: [
