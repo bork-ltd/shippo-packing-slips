@@ -3,6 +3,8 @@ import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import type { Order } from 'shippo/models/components';
 
+import { groupLineItems, type LineItemGroup } from '../lib/group-line-items';
+
 /**
  * Page dimensions for 4x6 inch label
  * 1 inch = 72 points in PDFKit
@@ -45,6 +47,16 @@ const TABLE_SEPARATOR_LINE_WIDTH = 0.5;
 const TABLE_QTY_COLUMN_WIDTH = 30;
 const TABLE_COLUMN_GAP = 10; // Gap between items and quantity columns
 export const TABLE_ROW_PADDING = 6; // Vertical padding top and bottom of each row
+const VARIANT_INDENT = 10; // Left indent for variant rows under a group title
+const ITEM_LINE_SPACING = 3; // Extra spacing added to each title/variant line
+
+/**
+ * Total Items callout
+ */
+const TOTAL_ITEMS_BOX_PADDING = 6;
+const TOTAL_ITEMS_NUMBER_SCALE = 3; // Count is rendered at 3x the base font size
+// Inter-Bold at DEFAULT_FONT_SIZE: (ascender 968.75 - capHeight 727.539) / 1000 * 8
+const TOTAL_ITEMS_BOX_TOP_OFFSET = 1.93;
 
 /**
  * Generate a packing slip PDF for a given order
@@ -111,24 +123,39 @@ export async function generatePackingSlip(
 }
 
 /**
- * Calculate the height needed to render a line item
- * @param item - Line item to measure
- * @param singleLineHeight - Height of a single line of text
+ * Whether a group's variants should be rendered as their own indented rows.
+ * A lone variant with no variantTitle carries nothing beyond what the group
+ * title already shows, so it is skipped.
+ */
+function hasVisibleVariantRows(group: LineItemGroup): boolean {
+  return (
+    group.variants.length > 1 ||
+    (group.variants.length === 1 && !!group.variants[0].variantTitle)
+  );
+}
+
+/**
+ * Calculate the height needed to render a line item group: its (possibly
+ * wrapped) title, plus one row per visible variant, when there are any.
+ * @param group - Line item group to measure
+ * @param titleHeight - Measured height of the group's title at its render
+ *   width, wrapped onto as many lines as it needs
+ * @param singleLineHeight - Height of a single line of variant text
  * @returns Total height needed including padding
  */
-export function calculateItemHeight(
-  item: NonNullable<Order['lineItems']>[number],
+export function calculateGroupHeight(
+  group: LineItemGroup,
+  titleHeight: number,
   singleLineHeight: number,
 ): number {
-  let height = TABLE_ROW_PADDING + singleLineHeight; // Top padding + title
+  const variantLines = hasVisibleVariantRows(group) ? group.variants.length : 0;
 
-  if (item.variantTitle) {
-    height += singleLineHeight; // Variant title
-  }
-
-  height += TABLE_ROW_PADDING; // Bottom padding
-
-  return height;
+  return (
+    TABLE_ROW_PADDING + // Top padding
+    titleHeight + // Title row(s)
+    variantLines * singleLineHeight +
+    TABLE_ROW_PADDING // Bottom padding
+  );
 }
 
 /**
@@ -299,17 +326,52 @@ function renderHeader(
     orderDetailsY += LINE_HEIGHT;
   }
 
-  // Total Items with right-aligned label and left-aligned value
+  // Total Items — label with right-aligned/left-aligned layout matching
+  // Order ID/Order Date; a box surrounds only the enlarged count
   const totalItems =
     order.lineItems?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+
   doc.font('Inter-Bold').text('Total Items:', midPoint, orderDetailsY, {
     align: 'right',
     width: maxLabelWidth,
   });
+
+  const numberFontSize = DEFAULT_FONT_SIZE * TOTAL_ITEMS_NUMBER_SCALE;
+  doc.font('Inter-Bold').fontSize(numberFontSize);
+  const numberText = totalItems.toString();
+  const numberWidth = doc.widthOfString(numberText);
+  const numberHeight = doc.currentLineHeight();
+  doc.fontSize(DEFAULT_FONT_SIZE);
+
+  // Square by default (min width = height); grows wider only if the number
+  // itself needs more room than that.
+  const boxHeight = numberHeight + TOTAL_ITEMS_BOX_PADDING * 2;
+  const boxWidth = Math.max(
+    boxHeight,
+    numberWidth + TOTAL_ITEMS_BOX_PADDING * 2,
+  );
+  const boxX = valueColumnStart;
+  // A text call's y is the top of the font's ascender line, not the visual
+  // cap-height top of its glyphs — for Inter-Bold at DEFAULT_FONT_SIZE that
+  // gap is ~2pt. rect() has no such offset, so without this the box's crisp
+  // top edge sits visibly above where "Total Items:" appears to start.
+  const boxY = orderDetailsY + TOTAL_ITEMS_BOX_TOP_OFFSET;
+
   doc
-    .font('Inter')
-    .text(totalItems.toString(), valueColumnStart, orderDetailsY);
-  orderDetailsY += LINE_HEIGHT;
+    .lineWidth(TABLE_HEADER_LINE_WIDTH)
+    .rect(boxX, boxY, boxWidth, boxHeight)
+    .stroke();
+
+  doc
+    .fontSize(numberFontSize)
+    .text(
+      numberText,
+      boxX + (boxWidth - numberWidth) / 2,
+      boxY + TOTAL_ITEMS_BOX_PADDING,
+    );
+  doc.fontSize(DEFAULT_FONT_SIZE);
+
+  orderDetailsY = Math.max(orderDetailsY + LINE_HEIGHT, boxY + boxHeight);
 
   // Move y past whichever section is taller
   y = Math.max(shipToEndY, orderDetailsY) + SECTION_SPACING;
@@ -335,27 +397,49 @@ function renderItemsTable(
     return y;
   }
 
+  const groups = groupLineItems(lineItems);
+
   // Table column positions
   const itemsColumnX = MARGIN;
   const qtyColumnX = PAGE_WIDTH - MARGIN - TABLE_QTY_COLUMN_WIDTH;
   const itemsColumnWidth = qtyColumnX - itemsColumnX - TABLE_COLUMN_GAP;
+  const variantColumnX = itemsColumnX + VARIANT_INDENT;
+  const variantColumnWidth = itemsColumnWidth - VARIANT_INDENT;
+  // The title has no quantity alongside it (the order-level Total Items
+  // count above already covers that), so it can use the full row width.
+  const titleWidth = PAGE_WIDTH - 2 * MARGIN;
 
   // Render initial table headers
   y = renderTableHeaders(doc, itemsColumnX, qtyColumnX, y);
 
-  // Render each line item
+  // Render each line item group
   doc.font('Inter');
 
-  for (let i = 0; i < lineItems.length; i++) {
-    const item = lineItems[i];
+  /** Measure a group's title height at its render width, in the bold font it renders with. */
+  function measureTitleHeight(group: LineItemGroup): number {
+    doc.font('Inter-Bold');
+    const height = doc.heightOfString(group.title, {
+      lineGap: ITEM_LINE_SPACING,
+      width: titleWidth,
+    });
+    doc.font('Inter');
+    return height;
+  }
 
-    // Measure the space needed for this item before checking page break
-    const title = item.title || 'Unknown Item';
-    const singleLineHeight = doc.currentLineHeight();
-    const itemHeight = calculateItemHeight(item, singleLineHeight);
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
 
-    // Check if we need a new page based on actual item height
-    const wouldFit = y + itemHeight <= PAGE_HEIGHT - MARGIN;
+    // Measure the space needed for this group before checking page break
+    const singleLineHeight = doc.currentLineHeight() + ITEM_LINE_SPACING;
+    const titleHeight = measureTitleHeight(group);
+    const groupHeight = calculateGroupHeight(
+      group,
+      titleHeight,
+      singleLineHeight,
+    );
+
+    // Check if we need a new page based on actual group height
+    const wouldFit = y + groupHeight <= PAGE_HEIGHT - MARGIN;
 
     if (!wouldFit) {
       doc.addPage({
@@ -367,53 +451,56 @@ function renderItemsTable(
       y = renderTableHeaders(doc, itemsColumnX, qtyColumnX, y);
     }
 
-    // Add padding at top of row
+    // Add padding at top of group
     y += TABLE_ROW_PADDING;
 
-    const startY = y;
-
-    doc.text(title, itemsColumnX, y, {
-      ellipsis: true,
-      height: singleLineHeight,
-      width: itemsColumnWidth,
+    // Group title (bold), wrapping onto as many lines as it needs
+    doc.font('Inter-Bold');
+    doc.text(group.title, itemsColumnX, y, {
+      lineGap: ITEM_LINE_SPACING,
+      width: titleWidth,
     });
+    doc.font('Inter');
 
-    // Quantity (right-aligned, same row as title)
-    const quantity = item.quantity || 0;
-    doc.text(quantity.toString(), qtyColumnX, startY, {
-      align: 'right',
-      width: TABLE_QTY_COLUMN_WIDTH,
-    });
+    y += titleHeight;
 
-    y = startY + singleLineHeight;
-
-    // Variant title (if present)
-    if (item.variantTitle) {
-      doc.font('Inter-Bold').text(item.variantTitle, itemsColumnX, y, {
-        ellipsis: true,
-        height: singleLineHeight,
-        width: itemsColumnWidth,
-      });
-      doc.font('Inter'); // Reset to regular font
-
-      y += singleLineHeight;
+    // Variant rows (indented), each with its own quantity
+    if (hasVisibleVariantRows(group)) {
+      for (const variant of group.variants) {
+        doc.text(variant.variantTitle || 'Unknown variant', variantColumnX, y, {
+          ellipsis: true,
+          height: singleLineHeight,
+          width: variantColumnWidth,
+        });
+        doc.text(variant.quantity.toString(), qtyColumnX, y, {
+          align: 'right',
+          width: TABLE_QTY_COLUMN_WIDTH,
+        });
+        y += singleLineHeight;
+      }
     }
 
-    // Add padding at bottom of row
+    // Add padding at bottom of group
     y += TABLE_ROW_PADDING;
 
-    // Draw a thin line between items (except after the last item or if next item will be on new page)
-    const isLastItem = i === lineItems.length - 1;
+    // Draw a thin line between groups (except after the last group or if the
+    // next group will be on a new page)
+    const isLastGroup = i === groups.length - 1;
     let willNeedNewPage = false;
 
-    if (!isLastItem) {
-      // Check if next item will fit on this page
-      const nextItem = lineItems[i + 1];
-      const nextItemHeight = calculateItemHeight(nextItem, singleLineHeight);
-      willNeedNewPage = y + nextItemHeight > PAGE_HEIGHT - MARGIN;
+    if (!isLastGroup) {
+      // Check if next group will fit on this page
+      const nextGroup = groups[i + 1];
+      const nextTitleHeight = measureTitleHeight(nextGroup);
+      const nextGroupHeight = calculateGroupHeight(
+        nextGroup,
+        nextTitleHeight,
+        singleLineHeight,
+      );
+      willNeedNewPage = y + nextGroupHeight > PAGE_HEIGHT - MARGIN;
     }
 
-    if (!isLastItem && !willNeedNewPage) {
+    if (!isLastGroup && !willNeedNewPage) {
       doc
         .lineWidth(TABLE_SEPARATOR_LINE_WIDTH)
         .moveTo(MARGIN, y)
