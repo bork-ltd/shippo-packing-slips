@@ -24,6 +24,7 @@
     "download:fonts": "node scripts/download-fonts.mjs",
     "generate": "yarn build:bundle && yarn download:fonts && node dist/bundle/index.js",
     "postinstall": "lefthook install",
+    "preview:packing-slips": "yarn build && node scripts/download-fonts.mjs dist/services && node dist/scripts/generate-packing-slip-preview.js",
     "sort-package": "yarn dlx sort-package-json",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Downloads Inter-Regular.ttf and Inter-Bold.ttf from the latest rsms/inter
- * GitHub release into dist/bundle/, where the ncc bundle expects to find them.
+ * GitHub release into dist/bundle/ (default) — where the ncc bundle expects
+ * to find them — or another directory passed as the first CLI argument (e.g.
+ * `dist/services`, where a plain `tsc` build's pdf-generator.js looks).
  *
  * Skips download if both files are already present (e.g. after a clean build
  * where fonts haven't changed).
@@ -13,7 +15,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUTDIR = path.resolve(__dirname, '..', 'dist', 'bundle');
+const OUTDIR = process.argv[2]
+  ? path.resolve(process.cwd(), process.argv[2])
+  : path.resolve(__dirname, '..', 'dist', 'bundle');
 const TMP_ZIP = '/tmp/inter-font.zip';
 const TMP_EXTRACT = '/tmp/inter-font-extract';
 
