@@ -215,4 +215,15 @@ describe('calculateFetchWindow', () => {
     const { startDate } = calculateFetchWindow(now, 60, lastFetch, 10080, 1440);
     expect(startDate.toISOString()).toBe('2026-01-09T10:00:00.000Z');
   });
+
+  it('never narrows below an explicit lookbackMinutes baseline even when it exceeds maxLookbackMinutes', () => {
+    // Same "baseline always wins" invariant as the 2x-default case above,
+    // but exercised with an explicit lookbackMinutes (e.g. a misconfigured
+    // ORDERS_LOOKBACK_MINUTES set larger than MAX_LOOKBACK_MINUTES): the
+    // baseline (24h = 1440min) reaches back further than maxLookbackMinutes
+    // (60min) alone would allow, so the cap has no effect at all here.
+    const lastFetch = new Date('2026-01-09T00:00:00.000Z'); // older than the 24h baseline
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 60, 1440);
+    expect(startDate.toISOString()).toBe('2026-01-09T10:00:00.000Z');
+  });
 });

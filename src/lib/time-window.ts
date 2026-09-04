@@ -94,8 +94,14 @@ export function calculateFetchWindow(
   }
 
   // Clamped to the cap, but never narrower than the baseline: a
-  // maxLookbackMinutes shorter than the baseline lookback must not shrink
-  // the window below normal-operation size.
+  // maxLookbackMinutes shorter than the baseline lookback (2x
+  // timeWindowMinutes, or an explicit lookbackMinutes such as
+  // ORDERS_LOOKBACK_MINUTES) must not shrink the window below
+  // normal-operation size — the baseline always wins, which means
+  // maxLookbackMinutes has no effect at all when it's set smaller than the
+  // baseline. That's an intentional trade-off (normal operation must never
+  // regress), not a bug; a misconfiguration in that direction just makes
+  // maxLookbackMinutes a no-op rather than breaking anything.
   const cap = baseline.endDate.getTime() - maxLookbackMinutes * 60 * 1000;
   const startDate = new Date(
     Math.min(baseline.startDate.getTime(), Math.max(effectiveLastFetch, cap)),
