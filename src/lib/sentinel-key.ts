@@ -1,3 +1,5 @@
+export type SentinelKind = 'packing-slip' | 'label';
+
 /**
  * Build the dedup key shared by the /tmp PDF filename (packing slips and
  * labels) and its persistent print marker: `<kind>-<YYYY-MM-DD>-<id>`.
@@ -8,7 +10,7 @@
  *   characters (other than '-' and '_') are replaced with '_'.
  */
 export function buildSentinelKey(
-  kind: string,
+  kind: SentinelKind,
   date: Date | undefined,
   rawId: string,
 ): string {

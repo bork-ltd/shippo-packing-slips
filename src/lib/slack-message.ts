@@ -1,3 +1,5 @@
+import type { TimeWindow } from './time-window';
+
 const SHIPPO_ORDER_URL_BASE = 'https://apps.goshippo.com/orders';
 const TWEMOJI_URL_BASE =
   'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72';
@@ -160,8 +162,8 @@ export function formatLabelPrintedMessage(params: {
  * last fetch failed.
  */
 export type RunSummary = {
-  ordersWindow: { startDate: Date; endDate: Date };
-  labelsWindow: { startDate: Date; endDate: Date };
+  ordersWindow: TimeWindow;
+  labelsWindow: TimeWindow;
   packingSlips: { success: number; skipped: number; errors: number };
   labels: { success: number; skipped: number; errors: number };
   pickupSummary: string;

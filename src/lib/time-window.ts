@@ -53,11 +53,20 @@ export function calculateFetchWindow(
   }
 
   const baseline = calculateTimeWindow(now, timeWindowMinutes);
-  if (!lastFetch || lastFetch.getTime() >= baseline.startDate.getTime()) {
+  if (
+    !lastFetch ||
+    Number.isNaN(lastFetch.getTime()) ||
+    lastFetch.getTime() >= baseline.startDate.getTime()
+  ) {
     return baseline;
   }
 
+  // Clamped to the cap, but never narrower than the baseline: a
+  // maxLookbackMinutes shorter than 2x timeWindowMinutes must not shrink the
+  // window below normal-operation size.
   const cap = baseline.endDate.getTime() - maxLookbackMinutes * 60 * 1000;
-  const startDate = new Date(Math.max(lastFetch.getTime(), cap));
+  const startDate = new Date(
+    Math.min(baseline.startDate.getTime(), Math.max(lastFetch.getTime(), cap)),
+  );
   return { startDate, endDate: baseline.endDate };
 }

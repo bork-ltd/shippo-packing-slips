@@ -22,9 +22,15 @@ const TMP_PDF_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
  * daily pickup sentinel. Configurable via STATE_DIR (primarily for tests);
  * defaults to a dotfile under the Pi user's home directory so it survives a
  * reboot, unlike /tmp (tmpfs).
+ *
+ * An unset or blank STATE_DIR (e.g. the `STATE_DIR=` placeholder in
+ * .env.example) must fall back to the default — dotenv parses that as `''`,
+ * which is not nullish, so `??` alone would silently resolve to a relative
+ * path under the cron job's cwd instead.
  */
 export function getStateDir(): string {
-  return process.env.STATE_DIR ?? path.join(os.homedir(), '.shippo-state');
+  const configured = process.env.STATE_DIR?.trim();
+  return configured ? configured : path.join(os.homedir(), '.shippo-state');
 }
 
 function printedDir(stateDir: string): string {
@@ -111,17 +117,20 @@ export async function writePrintMarker(
 /**
  * Delete print markers and the pickup sentinel older than maxLookbackMs
  * (they can never be relevant again — the fetch window can never widen past
- * that cap), and /tmp PDFs older than an hour (stale sentinels from a failed
- * marker write, or leftovers from before this migration).
+ * that cap), and stale PDFs older than an hour in tmpDir (a failed marker
+ * write, or a leftover from before this migration).
+ * @param tmpDir - Directory scanned for stale packing-slip/label PDFs.
+ *   Defaults to '/tmp'; overridable so tests never touch the real /tmp.
  */
 export async function sweepState(
   stateDir: string,
   now: Date,
   maxLookbackMs: number,
+  tmpDir = '/tmp',
 ): Promise<void> {
   await sweepDirByAge(printedDir(stateDir), now.getTime() - maxLookbackMs);
   await sweepPickupSentinels(stateDir, now.getTime() - maxLookbackMs);
-  await sweepTmpPdfs(now.getTime() - TMP_PDF_MAX_AGE_MS);
+  await sweepTmpPdfs(tmpDir, now.getTime() - TMP_PDF_MAX_AGE_MS);
 }
 
 async function sweepDirByAge(dir: string, cutoffMs: number): Promise<void> {
@@ -184,19 +193,19 @@ async function sweepPickupSentinels(
   }
 }
 
-async function sweepTmpPdfs(cutoffMs: number): Promise<void> {
+async function sweepTmpPdfs(tmpDir: string, cutoffMs: number): Promise<void> {
   let entries: string[];
   try {
-    entries = await readdir('/tmp');
+    entries = await readdir(tmpDir);
   } catch (error) {
     console.warn(
-      `Warning: failed to sweep /tmp: ${error instanceof Error ? error.message : String(error)}`,
+      `Warning: failed to sweep ${tmpDir}: ${error instanceof Error ? error.message : String(error)}`,
     );
     return;
   }
   for (const entry of entries) {
     if (!/^(packing-slip|label)-.*\.pdf$/.test(entry)) continue;
-    const filePath = path.join('/tmp', entry);
+    const filePath = path.join(tmpDir, entry);
     try {
       const stats = await stat(filePath);
       if (stats.mtimeMs < cutoffMs) {

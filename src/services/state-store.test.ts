@@ -12,13 +12,18 @@ import {
 } from './state-store';
 
 let stateDir: string;
+let tmpDir: string;
 
 beforeEach(async () => {
   stateDir = await mkdtemp(path.join(os.tmpdir(), 'shippo-state-test-'));
+  // A separate fake "/tmp" so sweepState's PDF sweep never touches the
+  // machine's real /tmp directory.
+  tmpDir = await mkdtemp(path.join(os.tmpdir(), 'shippo-tmp-test-'));
 });
 
 afterEach(async () => {
   await rm(stateDir, { recursive: true, force: true });
+  await rm(tmpDir, { recursive: true, force: true });
 });
 
 describe('fetch watermarks', () => {
@@ -80,7 +85,7 @@ describe('sweepState', () => {
     const past = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     await utimes(oldPath, past, past);
 
-    await sweepState(stateDir, new Date(), 7 * 24 * 60 * 60 * 1000);
+    await sweepState(stateDir, new Date(), 7 * 24 * 60 * 60 * 1000, tmpDir);
 
     expect(await hasPrintMarker(stateDir, oldKey)).toBe(false);
     expect(await hasPrintMarker(stateDir, freshKey)).toBe(true);
@@ -94,16 +99,42 @@ describe('sweepState', () => {
     const past = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     await utimes(oldSentinel, past, past);
 
-    await sweepState(stateDir, new Date(), 7 * 24 * 60 * 60 * 1000);
+    await sweepState(stateDir, new Date(), 7 * 24 * 60 * 60 * 1000, tmpDir);
 
     await expect(stat(oldSentinel)).rejects.toThrow();
     await expect(stat(freshSentinel)).resolves.toBeDefined();
   });
 
+  it('removes stale tmpDir PDFs older than an hour and keeps recent ones and non-matching files', async () => {
+    const oldPdf = path.join(tmpDir, 'packing-slip-2026-01-01-OLD.pdf');
+    const freshPdf = path.join(tmpDir, 'label-2026-01-01-FRESH.pdf');
+    const unrelated = path.join(tmpDir, 'not-ours.pdf');
+    await writeFile(oldPdf, '');
+    await writeFile(freshPdf, '');
+    await writeFile(unrelated, '');
+    const past = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(oldPdf, past, past);
+    await utimes(unrelated, past, past);
+
+    await sweepState(stateDir, new Date(), 7 * 24 * 60 * 60 * 1000, tmpDir);
+
+    await expect(stat(oldPdf)).rejects.toThrow();
+    await expect(stat(freshPdf)).resolves.toBeDefined();
+    // Old but not our naming pattern — must survive the sweep.
+    await expect(stat(unrelated)).resolves.toBeDefined();
+  });
+
   it('is a no-op when the state directory does not exist yet', async () => {
     const missingDir = path.join(stateDir, 'never-created');
     await expect(
-      sweepState(missingDir, new Date(), 7 * 24 * 60 * 60 * 1000),
+      sweepState(missingDir, new Date(), 7 * 24 * 60 * 60 * 1000, tmpDir),
+    ).resolves.toBeUndefined();
+  });
+
+  it('warns and continues when tmpDir does not exist', async () => {
+    const missingTmpDir = path.join(tmpDir, 'never-created');
+    await expect(
+      sweepState(stateDir, new Date(), 7 * 24 * 60 * 60 * 1000, missingTmpDir),
     ).resolves.toBeUndefined();
   });
 });

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 /**
  * Whether a pickup scheduling error is USPS reporting that a pickup was
  * already requested for today. This is a benign condition — additional
@@ -18,5 +20,8 @@ export function isDuplicatePickupError(message: string): boolean {
  * @param stateDir - The persistent state directory (see src/services/state-store.ts)
  */
 export function pickupSentinelPath(now: Date, stateDir: string): string {
-  return `${stateDir}/pickup-requested-${now.toISOString().slice(0, 10)}`;
+  return path.join(
+    stateDir,
+    `pickup-requested-${now.toISOString().slice(0, 10)}`,
+  );
 }

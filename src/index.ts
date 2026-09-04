@@ -83,7 +83,6 @@ async function runPackingSlipsJob(
     console.log('');
     return { success: 0, errors: 1, skipped: 0, errorNotifications: [] };
   }
-  await writeLastFetch(stateDir, 'orders', endDate);
 
   // Regardless of INCLUDE_ALL_ORDER_STATUSES, never print a slip for an
   // order that has already shipped, been cancelled, or been refunded —
@@ -93,7 +92,15 @@ async function runPackingSlipsJob(
   );
 
   if (orders.length === 0) {
-    console.log('No orders found in the specified date range.\n');
+    const skippedTerminal = fetchedOrders.length - orders.length;
+    console.log(
+      skippedTerminal > 0
+        ? `No printable orders in the specified date range (${skippedTerminal} already shipped/cancelled/refunded).\n`
+        : 'No orders found in the specified date range.\n',
+    );
+    // Nothing to process, so the fetch itself is the run's full outcome —
+    // safe to advance the watermark.
+    await writeLastFetch(stateDir, 'orders', endDate);
     return { success: 0, errors: 0, skipped: 0, errorNotifications };
   }
 
@@ -172,6 +179,16 @@ async function runPackingSlipsJob(
       );
     }
 
+    // Only advance the watermark when every order in this window was
+    // handled without error. Otherwise a failed order's placedAt must stay
+    // inside the next run's window (via calculateFetchWindow) so it gets
+    // retried — advancing here regardless of errorCount would permanently
+    // drop any order whose printing/marking failed, since it would fall
+    // out of every future fetch window.
+    if (errorCount === 0) {
+      await writeLastFetch(stateDir, 'orders', endDate);
+    }
+
     return {
       success: successCount,
       errors: errorCount,
@@ -190,6 +207,9 @@ async function runPackingSlipsJob(
       detail: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString(),
     });
+    // Do not advance the watermark: the loop aborted partway, so orders
+    // after the failure point were never attempted and must stay in the
+    // next run's fetch window.
     return {
       success: successCount,
       errors: errorCount + 1,
@@ -234,10 +254,12 @@ async function runLabelsJob(
       errorNotifications: [],
     };
   }
-  await writeLastFetch(stateDir, 'labels', endDate);
 
   if (transactions.length === 0) {
     console.log('No labels found in the specified date range.\n');
+    // Nothing to process, so the fetch itself is the run's full outcome —
+    // safe to advance the watermark.
+    await writeLastFetch(stateDir, 'labels', endDate);
     return {
       success: 0,
       errors: 0,
@@ -341,6 +363,12 @@ async function runLabelsJob(
           trackingNumber: tx.trackingNumber,
         }),
       );
+    }
+
+    // Only advance the watermark when every label in this window was
+    // handled without error — see runPackingSlipsJob for why.
+    if (errorCount === 0) {
+      await writeLastFetch(stateDir, 'labels', endDate);
     }
 
     return {

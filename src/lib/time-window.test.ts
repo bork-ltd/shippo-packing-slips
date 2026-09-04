@@ -126,6 +126,28 @@ describe('calculateFetchWindow', () => {
     expect(startDate.toISOString()).toBe('2026-01-03T10:00:00.000Z');
   });
 
+  it('clamps startDate exactly to the cap when lastFetch equals it', () => {
+    // cap = endDate (10:00Z) - 180 minutes = 07:00Z, below the 08:00Z
+    // baseline, so the cap (not the baseline) governs here.
+    const lastFetch = new Date('2026-01-10T07:00:00.000Z');
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 180);
+    expect(startDate.toISOString()).toBe('2026-01-10T07:00:00.000Z');
+  });
+
+  it('never narrows startDate below the 2x baseline when maxLookbackMinutes < 2x timeWindowMinutes', () => {
+    // baseline startDate is 08:00Z; a 1-hour cap alone would compute 09:00Z,
+    // which is *after* the baseline start — must not shrink the window.
+    const lastFetch = new Date('2026-01-10T07:00:00.000Z');
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 60);
+    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+  });
+
+  it('treats an invalid (NaN-backed) lastFetch as absent', () => {
+    const invalidDate = new Date('not-a-date');
+    const { startDate } = calculateFetchWindow(now, 60, invalidDate, 10080);
+    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+  });
+
   it('throws RangeError for a non-positive maxLookbackMinutes', () => {
     expect(() => calculateFetchWindow(now, 60, null, 0)).toThrow(RangeError);
   });
