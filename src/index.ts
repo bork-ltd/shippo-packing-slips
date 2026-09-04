@@ -543,6 +543,18 @@ async function run() {
     process.env.MAX_LOOKBACK_MINUTES ?? '10080', // 7 days
     10,
   );
+  // Orders get a much wider *normal* baseline lookback than labels: a shop
+  // integration (Etsy, Shopify, ...) can take hours to sync an order's
+  // status to PAID after its placed_at, and the fetch filters on placed_at
+  // — once a run's window slides past an order's placed_at, that order can
+  // never be matched again on its own, even though nothing ever errored
+  // (see docs/ARCHITECTURE.md "Resilience to outages"). Labels have no such
+  // external sync lag (we create them ourselves) and keep the tight
+  // boundary-race-only 2x window.
+  const ordersLookbackMinutes = parseInt(
+    process.env.ORDERS_LOOKBACK_MINUTES ?? '1440', // 24 hours
+    10,
+  );
   const now = new Date();
   let ordersWindow: TimeWindow;
   let labelsWindow: TimeWindow;
@@ -556,6 +568,7 @@ async function run() {
       timeWindowMinutes,
       ordersLastFetch,
       maxLookbackMinutes,
+      ordersLookbackMinutes,
     );
     labelsWindow = calculateFetchWindow(
       now,

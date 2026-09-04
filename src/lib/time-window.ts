@@ -1,8 +1,18 @@
 export type TimeWindow = { startDate: Date; endDate: Date };
 
+/**
+ * @param lookbackMinutes - How far before endDate startDate reaches back.
+ *   Defaults to 2x timeWindowMinutes (the historical "2x lookback" — enough
+ *   to give a boundary-race order one extra run to sync as PAID). Pass a
+ *   larger value to cover a source with a longer sync lag than that (e.g. a
+ *   shop integration that can take hours to mark an order PAID after its
+ *   placed_at) — endDate stays anchored to timeWindowMinutes either way, only
+ *   startDate's reach changes.
+ */
 export function calculateTimeWindow(
   now: Date,
   timeWindowMinutes: number,
+  lookbackMinutes: number = 2 * timeWindowMinutes,
 ): TimeWindow {
   if (
     Number.isNaN(timeWindowMinutes) ||
@@ -18,16 +28,25 @@ export function calculateTimeWindow(
       `timeWindowMinutes must evenly divide 1440 (minutes in a day), got: ${timeWindowMinutes}`,
     );
   }
+  if (
+    Number.isNaN(lookbackMinutes) ||
+    lookbackMinutes <= 0 ||
+    !Number.isInteger(lookbackMinutes)
+  ) {
+    throw new RangeError(
+      `lookbackMinutes must be a positive integer, got: ${lookbackMinutes}`,
+    );
+  }
   const msPerWindow = timeWindowMinutes * 60 * 1000;
   const endDate = new Date(
     Math.floor(now.getTime() / msPerWindow) * msPerWindow,
   );
-  const startDate = new Date(endDate.getTime() - 2 * msPerWindow);
+  const startDate = new Date(endDate.getTime() - lookbackMinutes * 60 * 1000);
   return { startDate, endDate };
 }
 
 /**
- * Widen the normal 2x lookback window to cover a gap since the last
+ * Widen the normal baseline lookback window to cover a gap since the last
  * successful fetch, capped at maxLookbackMinutes so a very long outage
  * cannot trigger an unbounded catch-up fetch.
  *
@@ -40,15 +59,19 @@ export function calculateTimeWindow(
  * recovering from an outage that long.
  *
  * endDate always stays the deterministic boundary from calculateTimeWindow.
- * startDate only ever moves earlier than the 2x baseline (or stays put) —
- * a lastFetch that is in the future or newer than the baseline startDate
+ * startDate only ever moves earlier than the baseline (or stays put) — a
+ * lastFetch that is in the future or newer than the baseline startDate
  * leaves normal-operation behavior unchanged.
+ * @param lookbackMinutes - Forwarded to calculateTimeWindow for the
+ *   baseline; see its doc. Independent of maxLookbackMinutes, which only
+ *   bounds outage-driven widening.
  */
 export function calculateFetchWindow(
   now: Date,
   timeWindowMinutes: number,
   lastFetch: Date | null,
   maxLookbackMinutes: number,
+  lookbackMinutes?: number,
 ): TimeWindow {
   if (
     Number.isNaN(maxLookbackMinutes) ||
@@ -60,7 +83,7 @@ export function calculateFetchWindow(
     );
   }
 
-  const baseline = calculateTimeWindow(now, timeWindowMinutes);
+  const baseline = calculateTimeWindow(now, timeWindowMinutes, lookbackMinutes);
   const effectiveLastFetch =
     lastFetch && !Number.isNaN(lastFetch.getTime())
       ? lastFetch.getTime()
@@ -71,8 +94,8 @@ export function calculateFetchWindow(
   }
 
   // Clamped to the cap, but never narrower than the baseline: a
-  // maxLookbackMinutes shorter than 2x timeWindowMinutes must not shrink the
-  // window below normal-operation size.
+  // maxLookbackMinutes shorter than the baseline lookback must not shrink
+  // the window below normal-operation size.
   const cap = baseline.endDate.getTime() - maxLookbackMinutes * 60 * 1000;
   const startDate = new Date(
     Math.min(baseline.startDate.getTime(), Math.max(effectiveLastFetch, cap)),
