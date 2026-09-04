@@ -6,7 +6,7 @@ A single Node.js script that runs on a schedule via cron on a Raspberry Pi Zero 
 
 ## What It Does
 
-Each cron run performs three jobs over a **fetch window per job** — normally the last 2 × `CRON_TIME_WINDOW_MINUTES`, widened when either job's last successful fetch is older than that (see [Resilience to outages](#resilience-to-outages)):
+Each cron run performs three jobs over a **fetch window per job**, widened when either job's last successful fetch is older than the normal window (see [Resilience to outages](#resilience-to-outages)). Packing slips and labels use different normal windows (see [Two different lookback windows](#two-different-lookback-windows)):
 
 1. **Packing slips** — Fetch orders from Shippo (server-side `PAID`/`UNKNOWN` filter, unless `INCLUDE_ALL_ORDER_STATUSES=true`; client-side `isPrintableOrder` gates each one: `PAID` always prints, `UNKNOWN` prints only when `shopApp` is `Shippo` — an order created directly via the API/dashboard, e.g. duplicated to reprint a fulfillment, never receives a shop integration's payment webhook so never leaves `UNKNOWN` on its own; a terminal status — `SHIPPED`/`PARTIALLY_FULFILLED`/`CANCELLED`/`REFUNDED` — always excludes) → check print marker *(skip if found)* → generate PDF → print via `lp` → record print marker
 2. **Shipping labels** — Fetch transactions with Shippo labels not yet scanned by the carrier (`trackingStatus` is `PRE_TRANSIT`, `UNKNOWN`, or absent) → check print marker *(skip if found)* → download label PDF → print via `lp` → record print marker
@@ -35,26 +35,33 @@ A sweep on every run (`sweepState`) deletes markers and the pickup sentinel olde
 
 ### The boundary timing problem
 
-Orders near a cron window boundary may not yet be `PAID` (or not yet synced to the Shippo API) when the cron fires. The next run's window has moved forward and no longer covers that order's timestamp — it is permanently missed.
+Orders near a cron window boundary may not yet be `PAID` (or not yet synced to the Shippo API) when the cron fires — and for some shop integrations this can take hours, not seconds. The next run's window has moved forward and no longer covers that order's `placed_at` — it is permanently missed. See [Two different lookback windows](#two-different-lookback-windows) for how the orders job's baseline window is sized to absorb this.
 
-### Solution: 2x lookback + print markers
+### Solution: baseline lookback + print markers
 
-Both jobs query at least a **2x window** (e.g., last 2 hours for a 60-minute cron). On each run:
+Both jobs query at least their normal baseline window (see [Two different lookback windows](#two-different-lookback-windows)). On each run:
 
 - If a print marker for an item already exists, it was printed in a previous run → skip it
 - If not, print it and record the marker
 
 Under normal operation, this ensures every item in the trailing window gets a second chance to be processed without reprinting items that already went through.
 
+## Two different lookback windows
+
+`calculateFetchWindow` (`src/lib/time-window.ts`) computes a **baseline** window per job, then widens it for outage recovery (below). The baseline itself differs by job, because the two jobs have different failure modes:
+
+- **Labels** use the historical **2x `CRON_TIME_WINDOW_MINUTES`** window (e.g. last 2 hours for a 60-minute cron). We create labels ourselves — there's no external sync lag, so 2x is only there to survive one missed run at a cron-interval boundary.
+- **Packing slips (orders)** use a much wider **`ORDERS_LOOKBACK_MINUTES`** window (default 1440 minutes / 24 hours), independent of `CRON_TIME_WINDOW_MINUTES`. A shop integration (Etsy, Shopify, ...) can take **hours** to sync an order's status to `PAID` after its `placed_at`, and the fetch filters on `placed_at` — once a run's window slides past an order's `placed_at`, that order can never be matched again on its own, even though nothing ever errored (observed directly: an Etsy order took over 3 hours to sync as `PAID`, and a tight window silently missed it with no error and no Slack alert — there was nothing to error on, since the order simply never appeared in any fetch's results). `endDate` still floors to the deterministic `CRON_TIME_WINDOW_MINUTES` boundary either way; only how far `startDate` reaches back differs.
+
 ## Resilience to outages
 
-The 2x window alone only survives **one** missed run — two consecutive fetch failures permanently lose anything that falls out of the window before a run succeeds again. Each job instead tracks its own last-successful-fetch watermark (`orders-last-fetch` / `labels-last-fetch`). On every run, the window starts at the earlier of the normal 2x boundary and that watermark, capped at `MAX_LOOKBACK_MINUTES` (default 7 days) so a very long outage can't trigger an unbounded catch-up fetch — see `calculateFetchWindow` in `src/lib/time-window.ts`.
+The baseline window alone only survives one missed run for labels, or up to `ORDERS_LOOKBACK_MINUTES` of sync/processing lag for orders — beyond that, two consecutive fetch failures (or a sync delay longer than the baseline) permanently lose anything that falls out of the window before a run succeeds again. Each job instead tracks its own last-successful-fetch watermark (`orders-last-fetch` / `labels-last-fetch`). On every run, the window starts at the earlier of the job's normal baseline boundary and that watermark, capped at `MAX_LOOKBACK_MINUTES` (default 7 days) so a very long outage can't trigger an unbounded catch-up fetch — see `calculateFetchWindow` in `src/lib/time-window.ts`.
 
-A **missing or unparseable watermark file is treated as maximally stale**, not as "first run, assume healthy" — it widens straight to the `MAX_LOOKBACK_MINUTES` cap, same as an outage that long. This is deliberate: it makes the watermark file itself a manual recovery lever. Deleting `orders-last-fetch`/`labels-last-fetch` (or the whole state directory) forces the next run to fetch and print every non-terminal order/label in the last `MAX_LOOKBACK_MINUTES` — useful to force a reprint of anything that errored out, or to recover after wiping state for any other reason. It also means **the very first run ever** (a fresh Pi provision, or the first run after this feature was deployed) does the same 7-day catch-up, not a quiet 2x window — deploy or provision with that in mind.
+A **missing or unparseable watermark file is treated as maximally stale**, not as "first run, assume healthy" — it widens straight to the `MAX_LOOKBACK_MINUTES` cap, same as an outage that long. This is deliberate: it makes the watermark file itself a manual recovery lever. Deleting `orders-last-fetch`/`labels-last-fetch` (or the whole state directory) forces the next run to fetch and print every non-terminal order/label in the last `MAX_LOOKBACK_MINUTES` — useful to force a reprint of anything that errored out, or to recover after wiping state for any other reason. It also means **the very first run ever** (a fresh Pi provision, or the first run after this feature was deployed) does the same 7-day catch-up, not a quiet baseline window — deploy or provision with that in mind.
 
 There is deliberately **no in-process retry with backoff**. Cron already fires every `CRON_TIME_WINDOW_MINUTES`, and that's the retry; a failed fetch does not send a Slack alert either, since that would fire on every tick of an outage — the `HEALTHCHECK_PING_URL` dead-man's-switch (skipped on any failing run) is the single source of truth for "something is down." A failed fetch leaves its watermark unchanged, so the very next run's window widens automatically once the outage clears.
 
-Because the widened window can pull in items well outside a normal 2x reprint radius, the status filters described in [What It Does](#what-it-does) are load-bearing here: they are what stops a multi-day catch-up from reprinting a slip for an order that shipped last week, or a label whose package the carrier has already scanned.
+Because the widened window can pull in items well outside a normal baseline reprint radius, the status filters described in [What It Does](#what-it-does) are load-bearing here: they are what stops a multi-day catch-up from reprinting a slip for an order that shipped last week, or a label whose package the carrier has already scanned.
 
 ### Trade-offs and edge cases
 
@@ -67,7 +74,8 @@ Because the widened window can pull in items well outside a normal 2x reprint ra
 | Label download fails partway | No print marker recorded (write failed); next run retries — correct |
 | A job's fetch fails for longer than `MAX_LOOKBACK_MINUTES` | Orders/labels older than the cap are not automatically recovered — reconcile manually via the Shippo dashboard |
 | Watermark file deleted (deliberately or by an operator wiping state) | Treated as maximally stale — next run widens to `MAX_LOOKBACK_MINUTES` and reprints every non-terminal order/label in that window that lacks a print marker |
-| First run ever (fresh provision, or first run after this feature ships) | Same as above: no watermark file exists yet, so it widens to `MAX_LOOKBACK_MINUTES` rather than the normal 2x window |
+| First run ever (fresh provision, or first run after this feature ships) | Same as above: no watermark file exists yet, so it widens to `MAX_LOOKBACK_MINUTES` rather than the normal baseline window |
+| An order's `PAID` sync lands after the orders window has already slid past its `placed_at` | Missed with no error and no Slack alert (nothing to error on — the order just never appears in a fetch's results); `ORDERS_LOOKBACK_MINUTES` is sized to absorb typical sync lag, but a sync delay longer than that still needs a manual state wipe to recover, same as any other permanently-missed item |
 
 ## Stack
 
@@ -226,9 +234,11 @@ fetch failure specifically, see [Resilience to outages](#resilience-to-outages))
 `HEALTHCHECK_PING_URL` (dead-man's-switch pinged on successful runs; set the
 monitor's period to match `CRON_TIME_WINDOW_MINUTES` plus a few minutes of
 grace so a missed ping alerts when the Pi is offline or hung without
-false-alarming on a single transient blip), `MAX_LOOKBACK_MINUTES` (cap on how
-far a widened fetch window can reach back, default 7 days), and `STATE_DIR`
-(persistent state directory, default `~/.shippo-state`).
+false-alarming on a single transient blip), `ORDERS_LOOKBACK_MINUTES` (normal
+baseline lookback for the orders fetch, default 24 hours — see [Two different
+lookback windows](#two-different-lookback-windows)), `MAX_LOOKBACK_MINUTES`
+(cap on how far a widened fetch window can reach back, default 7 days), and
+`STATE_DIR` (persistent state directory, default `~/.shippo-state`).
 
 ## Printer
 

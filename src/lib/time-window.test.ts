@@ -78,6 +78,37 @@ describe('calculateTimeWindow', () => {
       expect(() => calculateTimeWindow(new Date(), 7)).toThrow('7');
     });
   });
+
+  describe('lookbackMinutes', () => {
+    it('defaults to 2x timeWindowMinutes when omitted', () => {
+      const now = new Date('2026-01-01T10:45:00.000Z');
+      const { startDate, endDate } = calculateTimeWindow(now, 60);
+      expect(endDate.getTime() - startDate.getTime()).toBe(2 * 60 * 60 * 1000);
+    });
+
+    it('uses an explicit lookbackMinutes instead of the 2x default', () => {
+      const now = new Date('2026-01-10T10:45:00.000Z');
+      const { startDate, endDate } = calculateTimeWindow(now, 60, 1440);
+      expect(endDate.toISOString()).toBe('2026-01-10T10:00:00.000Z');
+      expect(startDate.toISOString()).toBe('2026-01-09T10:00:00.000Z');
+    });
+
+    it('throws RangeError for a non-positive lookbackMinutes', () => {
+      expect(() => calculateTimeWindow(new Date(), 60, 0)).toThrow(RangeError);
+    });
+
+    it('throws RangeError for a non-integer lookbackMinutes', () => {
+      expect(() => calculateTimeWindow(new Date(), 60, 1.5)).toThrow(
+        RangeError,
+      );
+    });
+
+    it('throws RangeError for NaN lookbackMinutes', () => {
+      expect(() => calculateTimeWindow(new Date(), 60, NaN)).toThrow(
+        RangeError,
+      );
+    });
+  });
 });
 
 describe('calculateFetchWindow', () => {
@@ -173,5 +204,26 @@ describe('calculateFetchWindow', () => {
 
   it('propagates RangeError from calculateTimeWindow for an invalid timeWindowMinutes', () => {
     expect(() => calculateFetchWindow(now, 7, null, 10080)).toThrow(RangeError);
+  });
+
+  it('forwards a custom lookbackMinutes to the baseline instead of the 2x default', () => {
+    // A 24-hour orders lookback: baseline startDate reaches back a full day
+    // instead of 2 hours. lastFetch sits inside that wider baseline (but
+    // outside the normal 2-hour one), so this returns the baseline as-is —
+    // proving the baseline itself widened, not that outage-recovery kicked in.
+    const lastFetch = new Date('2026-01-10T00:00:00.000Z');
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 10080, 1440);
+    expect(startDate.toISOString()).toBe('2026-01-09T10:00:00.000Z');
+  });
+
+  it('never narrows below an explicit lookbackMinutes baseline even when it exceeds maxLookbackMinutes', () => {
+    // Same "baseline always wins" invariant as the 2x-default case above,
+    // but exercised with an explicit lookbackMinutes (e.g. a misconfigured
+    // ORDERS_LOOKBACK_MINUTES set larger than MAX_LOOKBACK_MINUTES): the
+    // baseline (24h = 1440min) reaches back further than maxLookbackMinutes
+    // (60min) alone would allow, so the cap has no effect at all here.
+    const lastFetch = new Date('2026-01-09T00:00:00.000Z'); // older than the 24h baseline
+    const { startDate } = calculateFetchWindow(now, 60, lastFetch, 60, 1440);
+    expect(startDate.toISOString()).toBe('2026-01-09T10:00:00.000Z');
   });
 });
