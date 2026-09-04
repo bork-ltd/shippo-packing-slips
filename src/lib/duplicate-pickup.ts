@@ -1,14 +1,21 @@
 import path from 'node:path';
 
 /**
- * Whether a pickup scheduling error is USPS reporting that a pickup was
- * already requested for today. This is a benign condition — additional
- * packages left at the pickup location are collected with the existing
- * pickup — so callers should treat it as "already scheduled", not a failure.
+ * Whether a pickup scheduling error is Shippo/USPS reporting that a pickup
+ * already exists. This is a benign condition — additional packages left at
+ * the pickup location are collected with the existing pickup — so callers
+ * should treat it as "already scheduled", not a failure.
+ *
+ * Covers two distinct error shapes seen from the API: the account-level
+ * "you already requested a pickup today" message, and the transaction-level
+ * "Transaction <id> already has a pickup scheduled" message returned when a
+ * transaction was manually re-included in a later pickup request.
  * @param message - The error message from the pickup API call
  */
 export function isDuplicatePickupError(message: string): boolean {
-  return /already requested a USPS pickup/i.test(message);
+  return /already (requested a USPS pickup|has a pickup scheduled)/i.test(
+    message,
+  );
 }
 
 /**

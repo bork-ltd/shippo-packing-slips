@@ -17,6 +17,14 @@ describe('isDuplicatePickupError', () => {
     ).toBe(true);
   });
 
+  it('matches the transaction-level duplicate-pickup message', () => {
+    expect(
+      isDuplicatePickupError(
+        'Failed to schedule pickup: API error occurred: Status 400 Content-Type "application/json; charset=utf-8". Body: {"transactions":["Transaction 5b33938850ff4efebc43d834a2e6f249 already has a pickup scheduled."]}',
+      ),
+    ).toBe(true);
+  });
+
   it('does not match other pickup errors', () => {
     expect(
       isDuplicatePickupError(
