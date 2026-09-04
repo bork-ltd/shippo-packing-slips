@@ -31,10 +31,18 @@ export function calculateTimeWindow(
  * successful fetch, capped at maxLookbackMinutes so a very long outage
  * cannot trigger an unbounded catch-up fetch.
  *
+ * A missing or invalid lastFetch (no watermark file, or unparseable
+ * content) is treated as maximally stale — the same as a watermark that
+ * predates the cap — not as "first run, assume healthy." This makes the
+ * watermark file itself the recovery lever: deleting it (or the whole
+ * state directory) deliberately forces a full reprint of every
+ * non-terminal order/label within maxLookbackMinutes, exactly like
+ * recovering from an outage that long.
+ *
  * endDate always stays the deterministic boundary from calculateTimeWindow.
  * startDate only ever moves earlier than the 2x baseline (or stays put) —
- * a lastFetch that is absent, in the future, or newer than the baseline
- * startDate leaves normal-operation behavior unchanged.
+ * a lastFetch that is in the future or newer than the baseline startDate
+ * leaves normal-operation behavior unchanged.
  */
 export function calculateFetchWindow(
   now: Date,
@@ -53,11 +61,12 @@ export function calculateFetchWindow(
   }
 
   const baseline = calculateTimeWindow(now, timeWindowMinutes);
-  if (
-    !lastFetch ||
-    Number.isNaN(lastFetch.getTime()) ||
-    lastFetch.getTime() >= baseline.startDate.getTime()
-  ) {
+  const effectiveLastFetch =
+    lastFetch && !Number.isNaN(lastFetch.getTime())
+      ? lastFetch.getTime()
+      : -Infinity;
+
+  if (effectiveLastFetch >= baseline.startDate.getTime()) {
     return baseline;
   }
 
@@ -66,7 +75,7 @@ export function calculateFetchWindow(
   // window below normal-operation size.
   const cap = baseline.endDate.getTime() - maxLookbackMinutes * 60 * 1000;
   const startDate = new Date(
-    Math.min(baseline.startDate.getTime(), Math.max(lastFetch.getTime(), cap)),
+    Math.min(baseline.startDate.getTime(), Math.max(effectiveLastFetch, cap)),
   );
   return { startDate, endDate: baseline.endDate };
 }

@@ -50,6 +50,8 @@ Under normal operation, this ensures every item in the trailing window gets a se
 
 The 2x window alone only survives **one** missed run — two consecutive fetch failures permanently lose anything that falls out of the window before a run succeeds again. Each job instead tracks its own last-successful-fetch watermark (`orders-last-fetch` / `labels-last-fetch`). On every run, the window starts at the earlier of the normal 2x boundary and that watermark, capped at `MAX_LOOKBACK_MINUTES` (default 7 days) so a very long outage can't trigger an unbounded catch-up fetch — see `calculateFetchWindow` in `src/lib/time-window.ts`.
 
+A **missing or unparseable watermark file is treated as maximally stale**, not as "first run, assume healthy" — it widens straight to the `MAX_LOOKBACK_MINUTES` cap, same as an outage that long. This is deliberate: it makes the watermark file itself a manual recovery lever. Deleting `orders-last-fetch`/`labels-last-fetch` (or the whole state directory) forces the next run to fetch and print every non-terminal order/label in the last `MAX_LOOKBACK_MINUTES` — useful to force a reprint of anything that errored out, or to recover after wiping state for any other reason. It also means **the very first run ever** (a fresh Pi provision, or the first run after this feature was deployed) does the same 7-day catch-up, not a quiet 2x window — deploy or provision with that in mind.
+
 There is deliberately **no in-process retry with backoff**. Cron already fires every `CRON_TIME_WINDOW_MINUTES`, and that's the retry; a failed fetch does not send a Slack alert either, since that would fire on every tick of an outage — the `HEALTHCHECK_PING_URL` dead-man's-switch (skipped on any failing run) is the single source of truth for "something is down." A failed fetch leaves its watermark unchanged, so the very next run's window widens automatically once the outage clears.
 
 Because the widened window can pull in items well outside a normal 2x reprint radius, the status filters described in [What It Does](#what-it-does) are load-bearing here: they are what stops a multi-day catch-up from reprinting a slip for an order that shipped last week, or a label whose package the carrier has already scanned.
@@ -64,6 +66,8 @@ Because the widened window can pull in items well outside a normal 2x reprint ra
 | Order cancelled before lookback cleanup | Excluded by the terminal-status filter regardless of markers |
 | Label download fails partway | No print marker recorded (write failed); next run retries — correct |
 | A job's fetch fails for longer than `MAX_LOOKBACK_MINUTES` | Orders/labels older than the cap are not automatically recovered — reconcile manually via the Shippo dashboard |
+| Watermark file deleted (deliberately or by an operator wiping state) | Treated as maximally stale — next run widens to `MAX_LOOKBACK_MINUTES` and reprints every non-terminal order/label in that window that lacks a print marker |
+| First run ever (fresh provision, or first run after this feature ships) | Same as above: no watermark file exists yet, so it widens to `MAX_LOOKBACK_MINUTES` rather than the normal 2x window |
 
 ## Stack
 
