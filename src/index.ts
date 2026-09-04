@@ -6,7 +6,7 @@ import {
   isDuplicatePickupError,
   pickupSentinelPath,
 } from './lib/duplicate-pickup';
-import { isTerminalOrderStatus } from './lib/filter-order';
+import { isPrintableOrder } from './lib/filter-order';
 import { buildSentinelKey } from './lib/sentinel-key';
 import {
   formatErrorMessage,
@@ -62,10 +62,15 @@ async function runPackingSlipsJob(
   console.log('Fetching orders and generating packing slips...');
   const errorNotifications: QueuedError[] = [];
 
+  // UNKNOWN is included alongside PAID so orders created directly via the
+  // Shippo API/dashboard (shopApp 'Shippo') — which never go through a shop
+  // integration's payment webhook and so never leave UNKNOWN on their own —
+  // are returned by the API at all. isPrintableOrder below still gates an
+  // UNKNOWN order on shopApp === 'Shippo' before printing it.
   const statusFilter =
     process.env.INCLUDE_ALL_ORDER_STATUSES === 'true'
       ? undefined
-      : [OrderStatusEnum.Paid];
+      : [OrderStatusEnum.Paid, OrderStatusEnum.Unknown];
 
   // Fetch failures are isolated from the processing loop below: no Slack
   // alert (would fire on every cron tick of an outage — the heartbeat
@@ -84,19 +89,19 @@ async function runPackingSlipsJob(
     return { success: 0, errors: 1, skipped: 0, errorNotifications: [] };
   }
 
-  // Regardless of INCLUDE_ALL_ORDER_STATUSES, never print a slip for an
-  // order that is terminal — shipped, partially fulfilled, cancelled, or
-  // refunded (see isTerminalOrderStatus) — otherwise a widened catch-up
-  // window would reprint completed work.
-  const orders = fetchedOrders.filter(
-    (order) => !isTerminalOrderStatus(order.orderStatus),
+  // Regardless of INCLUDE_ALL_ORDER_STATUSES, only print for a PAID order,
+  // or an UNKNOWN order created directly via Shippo (see isPrintableOrder)
+  // — never a terminal (shipped/partially fulfilled/cancelled/refunded)
+  // order, otherwise a widened catch-up window would reprint completed work.
+  const orders = fetchedOrders.filter((order) =>
+    isPrintableOrder(order.orderStatus, order.shopApp),
   );
 
   if (orders.length === 0) {
-    const skippedTerminal = fetchedOrders.length - orders.length;
+    const skippedCount = fetchedOrders.length - orders.length;
     console.log(
-      skippedTerminal > 0
-        ? `No printable orders in the specified date range (${skippedTerminal} already shipped/cancelled/refunded).\n`
+      skippedCount > 0
+        ? `No printable orders in the specified date range (${skippedCount} filtered out by status).\n`
         : 'No orders found in the specified date range.\n',
     );
     // Nothing to process, so the fetch itself is the run's full outcome —
