@@ -6,13 +6,15 @@ import {
   isDuplicatePickupError,
   pickupSentinelPath,
 } from './lib/duplicate-pickup';
+import { isTerminalOrderStatus } from './lib/filter-order';
+import { buildSentinelKey } from './lib/sentinel-key';
 import {
   formatErrorMessage,
   formatLabelPrintedMessage,
   formatPackingSlipPrintedMessage,
   formatRunLogContext,
 } from './lib/slack-message';
-import { calculateTimeWindow } from './lib/time-window';
+import { calculateFetchWindow, type TimeWindow } from './lib/time-window';
 import { validatePickupConfig } from './lib/validate-pickup-config';
 import { sendHeartbeat } from './services/healthcheck';
 import { generatePackingSlip } from './services/pdf-generator';
@@ -27,6 +29,14 @@ import {
   type TransactionOrderInfo,
 } from './services/shippo';
 import { sendSlackNotification } from './services/slack';
+import {
+  getStateDir,
+  hasPrintMarker,
+  readLastFetch,
+  sweepState,
+  writeLastFetch,
+  writePrintMarker,
+} from './services/state-store';
 
 // Load environment variables (.env.local overrides .env)
 dotenv.config();
@@ -40,6 +50,7 @@ dotenv.config({ override: true, path: '.env.local' });
 type QueuedError = { context: string; detail: string; timestamp: string };
 
 async function runPackingSlipsJob(
+  stateDir: string,
   startDate: Date,
   endDate: Date,
 ): Promise<{
@@ -56,74 +67,67 @@ async function runPackingSlipsJob(
       ? undefined
       : [OrderStatusEnum.Paid];
 
+  // Fetch failures are isolated from the processing loop below: no Slack
+  // alert (would fire on every cron tick of an outage — the heartbeat
+  // monitor is the source of truth for "something is down"), and the fetch
+  // watermark is left unchanged so the next run's window widens to cover
+  // the gap (see calculateFetchWindow, src/lib/time-window.ts).
+  let fetchedOrders: Awaited<ReturnType<typeof fetchOrders>>;
   try {
-    const orders = await fetchOrders(startDate, endDate, statusFilter);
+    fetchedOrders = await fetchOrders(startDate, endDate, statusFilter);
+  } catch (error) {
+    console.error('✗ Failed to fetch orders from Shippo (will retry next run)');
+    console.error(
+      `  Error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    console.log('');
+    return { success: 0, errors: 1, skipped: 0, errorNotifications: [] };
+  }
 
-    if (orders.length === 0) {
-      console.log('No orders found in the specified date range.\n');
-      return { success: 0, errors: 0, skipped: 0, errorNotifications };
-    }
+  // Regardless of INCLUDE_ALL_ORDER_STATUSES, never print a slip for an
+  // order that is terminal — shipped, partially fulfilled, cancelled, or
+  // refunded (see isTerminalOrderStatus) — otherwise a widened catch-up
+  // window would reprint completed work.
+  const orders = fetchedOrders.filter(
+    (order) => !isTerminalOrderStatus(order.orderStatus),
+  );
 
-    console.log(`✓ Found ${orders.length} order(s)\n`);
+  if (orders.length === 0) {
+    const skippedTerminal = fetchedOrders.length - orders.length;
+    console.log(
+      skippedTerminal > 0
+        ? `No printable orders in the specified date range (${skippedTerminal} already shipped/cancelled/refunded).\n`
+        : 'No orders found in the specified date range.\n',
+    );
+    // Nothing to process, so the fetch itself is the run's full outcome —
+    // safe to advance the watermark.
+    await writeLastFetch(stateDir, 'orders', endDate);
+    return { success: 0, errors: 0, skipped: 0, errorNotifications };
+  }
 
-    let successCount = 0;
-    let errorCount = 0;
-    let skippedCount = 0;
+  console.log(`✓ Found ${orders.length} order(s)\n`);
 
+  let successCount = 0;
+  let errorCount = 0;
+  let skippedCount = 0;
+
+  try {
     for (const order of orders) {
       const orderNumber = order.orderNumber || order.objectId || 'unknown';
-      const sanitizedOrderNumber = orderNumber.replace(/[^a-zA-Z0-9-_]/g, '_');
-
-      // Extract and format the order date as YYYY-MM-DD
-      let datePrefix = 'unknown-date';
-      if (order.placedAt) {
-        const orderDate = new Date(order.placedAt);
-        const year = orderDate.getFullYear();
-        const month = String(orderDate.getMonth() + 1).padStart(2, '0');
-        const day = String(orderDate.getDate()).padStart(2, '0');
-        datePrefix = `${year}-${month}-${day}`;
-      }
-
-      const outputPath = path.join(
-        '/tmp',
-        `packing-slip-${datePrefix}-${sanitizedOrderNumber}.pdf`,
+      const key = buildSentinelKey(
+        'packing-slip',
+        order.placedAt ? new Date(order.placedAt) : undefined,
+        orderNumber,
       );
+      const outputPath = path.join('/tmp', `${key}.pdf`);
 
       try {
-        try {
-          await access(outputPath, constants.F_OK);
-          // File exists — was submitted to the print queue in a previous run
-          console.log(
-            `↩ Skipped (already printed): ${path.basename(outputPath)}`,
-          );
+        if (await hasPrintMarker(stateDir, key)) {
+          console.log(`↩ Skipped (already printed): ${key}`);
           console.log(`  Order: ${orderNumber}`);
           console.log('');
-          try {
-            await unlink(outputPath);
-          } catch (cleanupError) {
-            const code =
-              (cleanupError as NodeJS.ErrnoException).code ?? 'unknown';
-            const msg =
-              cleanupError instanceof Error
-                ? cleanupError.message
-                : String(cleanupError);
-            console.warn(
-              `  Warning: failed to delete sentinel file ${outputPath} [${code}]: ${msg}`,
-            );
-          }
-          // skippedCount counts items identified as already submitted to the
-          // print queue, regardless of whether sentinel cleanup succeeded.
           skippedCount++;
           continue;
-        } catch (accessError) {
-          if ((accessError as NodeJS.ErrnoException).code !== 'ENOENT') {
-            const code =
-              (accessError as NodeJS.ErrnoException).code ?? 'unknown';
-            throw new Error(
-              `Sentinel check failed for ${path.basename(outputPath)} [${code}]: ${accessError instanceof Error ? accessError.message : String(accessError)}`,
-            );
-          }
-          // ENOENT — file does not exist; proceed to generate and print
         }
 
         await generatePackingSlip(order, outputPath);
@@ -135,7 +139,10 @@ async function runPackingSlipsJob(
 
         await printPDF(outputPath);
         console.log(`  Printed: ${path.basename(outputPath)}`);
-        // Leave file on disk as deduplication sentinel for the lookback window
+        await writePrintMarker(stateDir, key);
+        // Best-effort: the durable marker above is now the source of truth
+        // for dedup, so a failed cleanup here only costs disk space.
+        await unlink(outputPath).catch(() => {});
         console.log('');
         successCount++;
       } catch (error) {
@@ -173,6 +180,16 @@ async function runPackingSlipsJob(
       );
     }
 
+    // Only advance the watermark when every order in this window was
+    // handled without error. Otherwise a failed order's placedAt must stay
+    // inside the next run's window (via calculateFetchWindow) so it gets
+    // retried — advancing here regardless of errorCount would permanently
+    // drop any order whose printing/marking failed, since it would fall
+    // out of every future fetch window.
+    if (errorCount === 0) {
+      await writeLastFetch(stateDir, 'orders', endDate);
+    }
+
     return {
       success: successCount,
       errors: errorCount,
@@ -180,7 +197,7 @@ async function runPackingSlipsJob(
       errorNotifications,
     };
   } catch (error) {
-    console.error('✗ Failed to fetch or process orders\n');
+    console.error('✗ Failed to process orders\n');
     if (error instanceof Error) {
       console.error('Error:', error.message);
     } else {
@@ -191,11 +208,20 @@ async function runPackingSlipsJob(
       detail: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString(),
     });
-    return { success: 0, errors: 1, skipped: 0, errorNotifications };
+    // Do not advance the watermark: the loop aborted partway, so orders
+    // after the failure point were never attempted and must stay in the
+    // next run's fetch window.
+    return {
+      success: successCount,
+      errors: errorCount + 1,
+      skipped: skippedCount,
+      errorNotifications,
+    };
   }
 }
 
 async function runLabelsJob(
+  stateDir: string,
   startDate: Date,
   endDate: Date,
 ): Promise<{
@@ -208,84 +234,63 @@ async function runLabelsJob(
   console.log('Fetching transactions and downloading labels...');
   const errorNotifications: QueuedError[] = [];
 
+  // See runPackingSlipsJob for why fetch failures are isolated: no Slack
+  // alert, watermark left unchanged so the next run's window widens.
+  let transactions: Awaited<ReturnType<typeof fetchTransactions>>;
   try {
-    const transactions = await fetchTransactions(startDate, endDate);
+    transactions = await fetchTransactions(startDate, endDate);
+  } catch (error) {
+    console.error(
+      '✗ Failed to fetch transactions from Shippo (will retry next run)',
+    );
+    console.error(
+      `  Error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    console.log('');
+    return {
+      success: 0,
+      errors: 1,
+      skipped: 0,
+      printedTransactionIds: [],
+      errorNotifications: [],
+    };
+  }
 
-    if (transactions.length === 0) {
-      console.log('No labels found in the specified date range.\n');
-      return {
-        success: 0,
-        errors: 0,
-        skipped: 0,
-        printedTransactionIds: [],
-        errorNotifications,
-      };
-    }
+  if (transactions.length === 0) {
+    console.log('No labels found in the specified date range.\n');
+    // Nothing to process, so the fetch itself is the run's full outcome —
+    // safe to advance the watermark.
+    await writeLastFetch(stateDir, 'labels', endDate);
+    return {
+      success: 0,
+      errors: 0,
+      skipped: 0,
+      printedTransactionIds: [],
+      errorNotifications,
+    };
+  }
 
-    console.log(`✓ Found ${transactions.length} label(s)\n`);
+  console.log(`✓ Found ${transactions.length} label(s)\n`);
 
-    let successCount = 0;
-    let errorCount = 0;
-    let skippedCount = 0;
-    const printedTransactionIds: string[] = [];
+  let successCount = 0;
+  let errorCount = 0;
+  let skippedCount = 0;
+  const printedTransactionIds: string[] = [];
 
+  try {
     for (const tx of transactions) {
-      const objectId = (tx.objectId || 'unknown').replace(
-        /[^a-zA-Z0-9-_]/g,
-        '_',
-      );
+      const objectId = tx.objectId || 'unknown';
       const labelUrl = tx.labelUrl as string;
-
-      // Extract and format the transaction date as YYYY-MM-DD
-      let datePrefix = 'unknown-date';
-      if (tx.objectCreated) {
-        const txDate = tx.objectCreated;
-        const year = txDate.getFullYear();
-        const month = String(txDate.getMonth() + 1).padStart(2, '0');
-        const day = String(txDate.getDate()).padStart(2, '0');
-        datePrefix = `${year}-${month}-${day}`;
-      }
-
-      const outputPath = path.join(
-        '/tmp',
-        `label-${datePrefix}-${objectId}.pdf`,
-      );
+      const key = buildSentinelKey('label', tx.objectCreated, objectId);
+      const outputPath = path.join('/tmp', `${key}.pdf`);
 
       try {
-        try {
-          await access(outputPath, constants.F_OK);
-          // File exists — was submitted to the print queue in a previous run
-          console.log(
-            `↩ Skipped (already printed): ${path.basename(outputPath)}`,
-          );
+        if (await hasPrintMarker(stateDir, key)) {
+          console.log(`↩ Skipped (already printed): ${key}`);
           console.log(`  Tracking: ${tx.trackingNumber || 'N/A'}`);
           console.log('');
-          try {
-            await unlink(outputPath);
-          } catch (cleanupError) {
-            const code =
-              (cleanupError as NodeJS.ErrnoException).code ?? 'unknown';
-            const msg =
-              cleanupError instanceof Error
-                ? cleanupError.message
-                : String(cleanupError);
-            console.warn(
-              `  Warning: failed to delete sentinel file ${outputPath} [${code}]: ${msg}`,
-            );
-          }
-          // skippedCount counts items identified as already submitted to the
-          // print queue, regardless of whether sentinel cleanup succeeded.
           skippedCount++;
           continue;
-        } catch (accessError) {
-          if ((accessError as NodeJS.ErrnoException).code !== 'ENOENT') {
-            const code =
-              (accessError as NodeJS.ErrnoException).code ?? 'unknown';
-            throw new Error(
-              `Sentinel check failed for ${path.basename(outputPath)} [${code}]: ${accessError instanceof Error ? accessError.message : String(accessError)}`,
-            );
-          }
-          // ENOENT — file does not exist; proceed to download and print
         }
 
         const res = await fetch(labelUrl);
@@ -298,7 +303,10 @@ async function runLabelsJob(
 
         await printPDF(outputPath);
         console.log(`  Printed: ${path.basename(outputPath)}`);
-        // Leave file on disk as deduplication sentinel for the lookback window
+        await writePrintMarker(stateDir, key);
+        // Best-effort: the durable marker above is now the source of truth
+        // for dedup, so a failed cleanup here only costs disk space.
+        await unlink(outputPath).catch(() => {});
         console.log('');
         successCount++;
         if (tx.objectId) {
@@ -358,6 +366,12 @@ async function runLabelsJob(
       );
     }
 
+    // Only advance the watermark when every label in this window was
+    // handled without error — see runPackingSlipsJob for why.
+    if (errorCount === 0) {
+      await writeLastFetch(stateDir, 'labels', endDate);
+    }
+
     return {
       success: successCount,
       errors: errorCount,
@@ -366,7 +380,7 @@ async function runLabelsJob(
       errorNotifications,
     };
   } catch (error) {
-    console.error('✗ Failed to fetch or process labels\n');
+    console.error('✗ Failed to process labels\n');
     if (error instanceof Error) {
       console.error('Error:', error.message);
     } else {
@@ -378,16 +392,19 @@ async function runLabelsJob(
       timestamp: new Date().toISOString(),
     });
     return {
-      success: 0,
-      errors: 1,
-      skipped: 0,
-      printedTransactionIds: [],
+      success: successCount,
+      errors: errorCount + 1,
+      skipped: skippedCount,
+      printedTransactionIds,
       errorNotifications,
     };
   }
 }
 
-async function runPickupJob(transactionIds: string[]): Promise<{
+async function runPickupJob(
+  stateDir: string,
+  transactionIds: string[],
+): Promise<{
   scheduled: boolean;
   alreadyScheduled?: boolean;
   confirmationCode?: string;
@@ -401,9 +418,10 @@ async function runPickupJob(transactionIds: string[]): Promise<{
 
   // One pickup request per UTC day: USPS rejects further requests and collects
   // additional packages with the existing pickup. The sentinel avoids the
-  // redundant API attempt; if /tmp was cleared (reboot), the one redundant
-  // attempt is answered by the duplicate-pickup response below.
-  const sentinelPath = pickupSentinelPath(new Date());
+  // redundant API attempt; it lives in the persistent state directory so a
+  // reboot cannot cause a redundant attempt (answered by the duplicate-pickup
+  // response below in the rare case it still happens).
+  const sentinelPath = pickupSentinelPath(new Date(), stateDir);
   try {
     await access(sentinelPath, constants.F_OK);
     console.log(
@@ -504,34 +522,71 @@ async function run() {
     process.exit(2);
   }
 
-  // Calculate a date window aligned to the nearest interval boundary.
-  // CRON_TIME_WINDOW_MINUTES must evenly divide 1440 (minutes in a day) so that
-  // boundaries are fixed points in time anchored to UTC midnight, making the window
-  // deterministic regardless of when within the interval the script actually starts.
+  const stateDir = getStateDir();
+
+  // Calculate a date window aligned to the nearest interval boundary, widened
+  // to cover any gap since each job's last successful fetch (capped at
+  // MAX_LOOKBACK_MINUTES). CRON_TIME_WINDOW_MINUTES must evenly divide 1440
+  // (minutes in a day) so that boundaries are fixed points in time anchored
+  // to UTC midnight, making the baseline window deterministic regardless of
+  // when within the interval the script actually starts.
   const timeWindowMinutes = parseInt(
     process.env.CRON_TIME_WINDOW_MINUTES ?? '60',
     10,
   );
-  let startDate: Date;
-  let endDate: Date;
+  const maxLookbackMinutes = parseInt(
+    process.env.MAX_LOOKBACK_MINUTES ?? '10080', // 7 days
+    10,
+  );
+  const now = new Date();
+  let ordersWindow: TimeWindow;
+  let labelsWindow: TimeWindow;
   try {
-    ({ startDate, endDate } = calculateTimeWindow(
-      new Date(),
+    const [ordersLastFetch, labelsLastFetch] = await Promise.all([
+      readLastFetch(stateDir, 'orders'),
+      readLastFetch(stateDir, 'labels'),
+    ]);
+    ordersWindow = calculateFetchWindow(
+      now,
       timeWindowMinutes,
-    ));
+      ordersLastFetch,
+      maxLookbackMinutes,
+    );
+    labelsWindow = calculateFetchWindow(
+      now,
+      timeWindowMinutes,
+      labelsLastFetch,
+      maxLookbackMinutes,
+    );
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : err}`);
     process.exit(2);
   }
 
-  console.log('Date range (2x lookback window):');
-  console.log('  Start:', startDate.toISOString());
-  console.log('  End:  ', endDate.toISOString());
+  console.log('Date range:');
+  console.log(
+    `  Packing slips: ${ordersWindow.startDate.toISOString()} to ${ordersWindow.endDate.toISOString()}`,
+  );
+  console.log(
+    `  Labels:        ${labelsWindow.startDate.toISOString()} to ${labelsWindow.endDate.toISOString()}`,
+  );
   console.log('');
 
-  const slipResults = await runPackingSlipsJob(startDate, endDate);
-  const labelResults = await runLabelsJob(startDate, endDate);
-  const pickupResult = await runPickupJob(labelResults.printedTransactionIds);
+  const slipResults = await runPackingSlipsJob(
+    stateDir,
+    ordersWindow.startDate,
+    ordersWindow.endDate,
+  );
+  const labelResults = await runLabelsJob(
+    stateDir,
+    labelsWindow.startDate,
+    labelsWindow.endDate,
+  );
+  const pickupResult = await runPickupJob(
+    stateDir,
+    labelResults.printedTransactionIds,
+  );
+  await sweepState(stateDir, now, maxLookbackMinutes * 60 * 1000);
 
   const combinedErrors = slipResults.errors + labelResults.errors;
 
@@ -579,8 +634,8 @@ async function run() {
   console.log('='.repeat(50));
 
   const logContext = formatRunLogContext({
-    startDate,
-    endDate,
+    ordersWindow,
+    labelsWindow,
     packingSlips: {
       success: slipResults.success,
       skipped: slipResults.skipped,

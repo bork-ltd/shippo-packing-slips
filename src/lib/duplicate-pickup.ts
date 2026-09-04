@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 /**
  * Whether a pickup scheduling error is USPS reporting that a pickup was
  * already requested for today. This is a benign condition — additional
@@ -11,11 +13,15 @@ export function isDuplicatePickupError(message: string): boolean {
 
 /**
  * Sentinel file path marking that a pickup request succeeded (or was reported
- * as a duplicate) on the given UTC date. Lives in /tmp like the print
- * sentinels: cleared on reboot, in which case one redundant pickup attempt is
- * made and answered by the duplicate-pickup response.
+ * as a duplicate) on the given UTC date. Lives in the persistent state
+ * directory alongside the print markers and fetch watermarks, so a reboot
+ * cannot cause a redundant pickup attempt.
  * @param now - Time of the current run
+ * @param stateDir - The persistent state directory (see src/services/state-store.ts)
  */
-export function pickupSentinelPath(now: Date): string {
-  return `/tmp/pickup-requested-${now.toISOString().slice(0, 10)}`;
+export function pickupSentinelPath(now: Date, stateDir: string): string {
+  return path.join(
+    stateDir,
+    `pickup-requested-${now.toISOString().slice(0, 10)}`,
+  );
 }

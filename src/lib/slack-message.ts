@@ -1,3 +1,5 @@
+import type { TimeWindow } from './time-window';
+
 const SHIPPO_ORDER_URL_BASE = 'https://apps.goshippo.com/orders';
 const TWEMOJI_URL_BASE =
   'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72';
@@ -153,12 +155,15 @@ export function formatLabelPrintedMessage(params: {
 }
 
 /**
- * Run-level counts and date range needed to reproduce the log's
- * "Date range" and "Summary" blocks verbatim.
+ * Run-level counts and date ranges needed to reproduce the log's
+ * "Date range" and "Summary" blocks verbatim. Packing slips and labels get
+ * separate ranges since each job's fetch window can widen independently
+ * (see calculateFetchWindow in src/lib/time-window.ts) when only one job's
+ * last fetch failed.
  */
 export type RunSummary = {
-  startDate: Date;
-  endDate: Date;
+  ordersWindow: TimeWindow;
+  labelsWindow: TimeWindow;
   packingSlips: { success: number; skipped: number; errors: number };
   labels: { success: number; skipped: number; errors: number };
   pickupSummary: string;
@@ -171,9 +176,9 @@ export type RunSummary = {
 export function formatRunLogContext(summary: RunSummary): string {
   const divider = '='.repeat(50);
   return [
-    'Date range (2x lookback window):',
-    `  Start: ${summary.startDate.toISOString()}`,
-    `  End:   ${summary.endDate.toISOString()}`,
+    'Date range:',
+    `  Packing slips: ${summary.ordersWindow.startDate.toISOString()} to ${summary.ordersWindow.endDate.toISOString()}`,
+    `  Labels:        ${summary.labelsWindow.startDate.toISOString()} to ${summary.labelsWindow.endDate.toISOString()}`,
     '',
     divider,
     'Summary:',
