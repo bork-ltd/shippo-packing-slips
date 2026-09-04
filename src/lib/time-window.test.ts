@@ -84,10 +84,21 @@ describe('calculateFetchWindow', () => {
   const now = new Date('2026-01-10T10:45:00.000Z');
   // baseline for (now, 60): endDate 10:00:00Z, startDate 08:00:00Z
 
-  it('returns the baseline window when lastFetch is null', () => {
+  it('treats a null lastFetch as maximally stale and widens to the cap', () => {
+    // No watermark file — same as one deliberately removed to force a
+    // full catch-up: widens all the way to the maxLookbackMinutes cap
+    // rather than trusting a small baseline window.
     const { startDate, endDate } = calculateFetchWindow(now, 60, null, 10080);
-    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+    expect(startDate.toISOString()).toBe('2026-01-03T10:00:00.000Z');
     expect(endDate.toISOString()).toBe('2026-01-10T10:00:00.000Z');
+  });
+
+  it('a null lastFetch still never narrows below the 2x baseline', () => {
+    // maxLookbackMinutes (60) < 2x timeWindowMinutes (120): the cap alone
+    // would be narrower than baseline, which must not happen even when
+    // lastFetch is null.
+    const { startDate } = calculateFetchWindow(now, 60, null, 60);
+    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
   });
 
   it('returns the baseline window when lastFetch is inside it', () => {
@@ -142,10 +153,10 @@ describe('calculateFetchWindow', () => {
     expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
   });
 
-  it('treats an invalid (NaN-backed) lastFetch as absent', () => {
+  it('treats an invalid (NaN-backed) lastFetch the same as null (widens to the cap)', () => {
     const invalidDate = new Date('not-a-date');
     const { startDate } = calculateFetchWindow(now, 60, invalidDate, 10080);
-    expect(startDate.toISOString()).toBe('2026-01-10T08:00:00.000Z');
+    expect(startDate.toISOString()).toBe('2026-01-03T10:00:00.000Z');
   });
 
   it('throws RangeError for a non-positive maxLookbackMinutes', () => {
