@@ -85,8 +85,9 @@ async function runPackingSlipsJob(
   }
 
   // Regardless of INCLUDE_ALL_ORDER_STATUSES, never print a slip for an
-  // order that has already shipped, been cancelled, or been refunded —
-  // otherwise a widened catch-up window would reprint completed work.
+  // order that is terminal — shipped, partially fulfilled, cancelled, or
+  // refunded (see isTerminalOrderStatus) — otherwise a widened catch-up
+  // window would reprint completed work.
   const orders = fetchedOrders.filter(
     (order) => !isTerminalOrderStatus(order.orderStatus),
   );

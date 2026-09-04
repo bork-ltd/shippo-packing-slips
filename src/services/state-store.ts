@@ -13,8 +13,10 @@ export type FetchJob = 'orders' | 'labels';
 
 /** Temp PDFs older than this are stale sentinels from a run whose printed/
  * marker write failed or a pre-migration leftover; the sweep clears them so
- * /tmp does not grow unbounded. Comfortably longer than any cron interval in
- * use. */
+ * /tmp does not grow unbounded. This is cleanup only — dedup no longer
+ * depends on /tmp's contents — so it's fine for this to equal or be shorter
+ * than CRON_TIME_WINDOW_MINUTES; it just governs how long a stale file can
+ * sit before being swept. */
 const TMP_PDF_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 /**
@@ -63,8 +65,14 @@ export async function readLastFetch(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return null;
     }
-    console.warn(
-      `Warning: failed to read fetch watermark ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    // Unlike ENOENT (expected on a first run or post-sweep), this is an
+    // unexpected failure (permissions, a corrupted filesystem, ...) that
+    // silently falls back to the normal 2x window below — defeating this
+    // job's outage recovery every run until fixed. Logged loudly (not
+    // console.warn) so it's greppable in cron.log rather than indistinguishable
+    // from the benign "no watermark yet" case.
+    console.error(
+      `CRITICAL: fetch watermark ${filePath} is unreadable (${(error as NodeJS.ErrnoException).code ?? 'unknown'}): ${error instanceof Error ? error.message : String(error)} — falling back to the normal window; outage recovery is disabled for this job until this is fixed`,
     );
     return null;
   }

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -50,6 +50,14 @@ describe('fetch watermarks', () => {
   it('returns null and warns for unparseable content', async () => {
     const filePath = path.join(stateDir, 'orders-last-fetch');
     await writeFile(filePath, 'not-a-date');
+    expect(await readLastFetch(stateDir, 'orders')).toBeNull();
+  });
+
+  it('returns null and logs loudly for a non-ENOENT read error', async () => {
+    // A directory in place of the watermark file triggers EISDIR on read —
+    // an unexpected error distinct from the benign "file doesn't exist yet".
+    const filePath = path.join(stateDir, 'orders-last-fetch');
+    await mkdir(filePath);
     expect(await readLastFetch(stateDir, 'orders')).toBeNull();
   });
 
