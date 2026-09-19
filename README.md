@@ -16,9 +16,9 @@ Raspberry Pi scripts to print packing slips, shipping labels, and schedule USPS 
 ## Local Development
 
 ```bash
-yarn install
+pnpm install
 cp .env.example .env.local  # add your SHIPPO_API_TOKEN
-yarn generate               # fetch orders and generate PDFs
+pnpm generate               # fetch orders and generate PDFs
 ```
 
 ### Environment Variables
@@ -45,8 +45,8 @@ Values in `.env.local` override `.env`.
 
 | Command | Description |
 |---|---|
-| `yarn build` | Compile TypeScript |
-| `yarn generate` | Build and run the main script |
+| `pnpm build` | Compile TypeScript |
+| `pnpm generate` | Build and run the main script |
 
 ## Deployment
 

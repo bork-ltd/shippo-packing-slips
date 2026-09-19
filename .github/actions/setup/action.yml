@@ -4,13 +4,14 @@ description: Sets up Node.js via .nvmrc, enables corepack, and installs dependen
 runs:
   using: composite
   steps:
+    - name: Enable corepack
+      shell: bash
+      run: corepack enable
     - name: Setup Node
       uses: actions/setup-node@v6
       with:
         node-version-file: .nvmrc
-    - name: Enable corepack
-      shell: bash
-      run: corepack enable
+        cache: pnpm
     - name: Install dependencies
       shell: bash
-      run: yarn install --immutable
+      run: pnpm install --frozen-lockfile

@@ -1,6 +1,6 @@
 # src/lib
 
-Pure, deterministic functions with no I/O or side effects. All files in this directory are subject to 100% test coverage enforcement via `vitest.config.ts`.
+Pure, deterministic functions with no I/O or side effects. All files in this directory are subject to 100% test coverage enforcement via `vitest.config.mts`.
 
 ## Modules
 

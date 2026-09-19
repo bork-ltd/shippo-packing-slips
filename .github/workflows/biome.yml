@@ -17,4 +17,4 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
       - name: Run Biome
-        run: yarn biome ci ./
+        run: pnpm biome ci ./
