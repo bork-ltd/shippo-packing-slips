@@ -18,7 +18,9 @@
 
 ### `.github/actions/setup`
 
-Shared setup sequence used by all three workflows. Encapsulates: Node.js setup via `.nvmrc`, corepack enable, and `pnpm install --frozen-lockfile`.
+Shared setup sequence used by all five workflows. Encapsulates: corepack enable, Node.js setup via `.nvmrc` with `cache: pnpm`, and `pnpm install --frozen-lockfile`.
+
+**Ordering**: `corepack enable` must run before `actions/setup-node`. The `cache: pnpm` option shells out to `pnpm store path`, which needs pnpm already on PATH.
 
 **Important**: Local composite actions cannot self-checkout — the runner workspace must already contain the repo when GitHub resolves the action definition. Each calling workflow must run `actions/checkout` as its first step before `uses: ./.github/actions/setup`.
 
