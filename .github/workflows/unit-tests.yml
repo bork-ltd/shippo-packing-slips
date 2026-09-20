@@ -20,7 +20,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
       - name: Run unit tests
-        run: yarn test --coverage
+        run: pnpm test --coverage
       - name: Upload code coverage
         uses: actions/upload-code-coverage@v1
         with:

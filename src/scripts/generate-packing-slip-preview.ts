@@ -15,7 +15,7 @@ dotenv.config({ override: true, path: '.env.local' });
  * verify layout changes against real order data (long titles, real
  * variant naming, multi-item orders) before shipping them.
  *
- * Usage: yarn preview:packing-slips [--days=N] [--limit=N]
+ * Usage: pnpm preview:packing-slips [--days=N] [--limit=N]
  */
 async function main() {
   const apiToken = process.env.SHIPPO_API_TOKEN;

@@ -1,16 +1,23 @@
-name: Setup Node and install dependencies
-description: Sets up Node.js via .nvmrc, enables corepack, and installs dependencies. Requires checkout to have already run.
+# NOTE: This is a local composite action and requires the repository to have
+# already been checked out before it is called (e.g. actions/checkout).
+#
+# NOTE: pnpm/action-setup runs before actions/setup-node so that setup-node's
+# built-in `cache: pnpm` option can resolve the pnpm store path, which needs
+# pnpm already on PATH. No version input is given: action-setup reads the
+# pinned version from package.json's packageManager field.
+
+name: Setup
+description: Install pnpm and dependencies
 
 runs:
   using: composite
   steps:
-    - name: Setup Node
-      uses: actions/setup-node@v6
+    - uses: pnpm/action-setup@v4
+
+    - uses: actions/setup-node@v6.2.0
       with:
         node-version-file: .nvmrc
-    - name: Enable corepack
+        cache: pnpm
+
+    - run: pnpm install --frozen-lockfile
       shell: bash
-      run: corepack enable
-    - name: Install dependencies
-      shell: bash
-      run: yarn install --immutable

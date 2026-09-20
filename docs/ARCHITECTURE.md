@@ -160,7 +160,7 @@ EOF
 
 To update the bundle after a new release, run `update-shippo` (alias configured during provisioning — see below).
 
-No git, yarn, or npm required on the Pi — only `node`, `curl`, and `unzip` (for initial provisioning).
+No git or package manager required on the Pi — only `node`, `curl`, and `unzip` (for initial provisioning).
 
 ### Pi Provisioning (one-time setup)
 

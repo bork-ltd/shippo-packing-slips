@@ -1,0 +1,10 @@
+savePrefix: ''
+strictPeerDependencies: true
+autoInstallPeers: false
+engineStrict: true
+strictDepBuilds: true
+minimumReleaseAge: 7200 # minutes; keep <= Dependabot cooldown default-days
+allowBuilds:
+  # lefthook's postinstall downloads its git-hooks-manager binary for the
+  # current platform; required for `pnpm run postinstall` to wire up hooks.
+  lefthook: true

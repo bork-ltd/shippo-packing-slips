@@ -22,12 +22,12 @@
     "clean": "rm -rf dist",
     "dev": "tsc --watch",
     "download:fonts": "node scripts/download-fonts.mjs",
-    "generate": "yarn build:bundle && yarn download:fonts && node dist/bundle/index.js",
+    "generate": "pnpm build:bundle && pnpm download:fonts && node dist/bundle/index.js",
     "postinstall": "lefthook install",
-    "preview:packing-slips": "yarn build && node scripts/download-fonts.mjs dist/services && node dist/scripts/generate-packing-slip-preview.js",
-    "sort-package": "yarn dlx sort-package-json",
+    "preview:packing-slips": "pnpm build && node scripts/download-fonts.mjs dist/services && node dist/scripts/generate-packing-slip-preview.js",
+    "sort-package": "pnpm dlx sort-package-json",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
     "test:unit": "vitest run --reporter=verbose",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -42,10 +42,11 @@
     "@types/node": "26.5.1",
     "@types/pdfkit": "0.17.6",
     "@vercel/ncc": "0.45.0",
-    "@vitest/coverage-v8": "5.0.1",
+    "@vitest/coverage-v8": "5.0.0",
     "lefthook": "2.1.14",
     "typescript": "5.9.3",
-    "vitest": "5.0.1"
+    "vite": "8.3.0",
+    "vitest": "5.0.0"
   },
-  "packageManager": "yarn@4.12.0"
+  "packageManager": "pnpm@12.4.2"
 }

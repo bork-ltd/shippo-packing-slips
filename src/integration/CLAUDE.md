@@ -5,7 +5,7 @@ Integration tests that call the real Shippo test-mode API. These are distinct fr
 ## Running
 
 ```bash
-SHIPPO_API_TOKEN=shippo_test_... yarn test:integration
+SHIPPO_API_TOKEN=shippo_test_... pnpm test:integration
 ```
 
 Requires a Shippo **test-mode** token (starts with `shippo_test_`). The production `SHIPPO_API_TOKEN` must **not** be used here.
