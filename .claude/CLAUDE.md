@@ -34,9 +34,3 @@ Local settings override shared settings, allowing individual users to customize 
 ### Plugins
 
 `enabledPlugins` in settings.json enables the Slack plugin (`slack@claude-plugins-official`) for all users of this repository, used when working on the Slack webhook notification formatting.
-
-## MCP Configuration
-
-- `.mcp.json` (repo root) — project-scoped MCP servers, committed to the repository and shared with all collaborators including cloud environments
-  - Currently configures the GitHub remote MCP via `https://api.githubcopilot.com/mcp`
-  - Requires a `GITHUB_PAT` environment variable with the following scopes: `repo`, `read:org`, `read:packages`, `notifications`, `security_events`, `gist`, `project`
