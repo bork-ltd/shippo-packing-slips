@@ -43,7 +43,6 @@
       "Write(file:.env*)"
     ]
   },
-  "enableAllProjectMcpServers": true,
   "enabledPlugins": {
     "slack@claude-plugins-official": true
   }
