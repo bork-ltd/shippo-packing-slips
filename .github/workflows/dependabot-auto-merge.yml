@@ -1,16 +1,49 @@
 name: Dependabot Auto-merge
 
+# Enables auto-merge on Dependabot PRs. Runs in base-branch context via
+# pull_request_target, which is safe here because no PR code is checked out
+# or executed. The "Require CI" repository ruleset on main holds the merge
+# until biome, typecheck, unit-tests and integration-tests pass.
+#
+# Uses GITHUB_TOKEN until a bje auto-merge GitHub App exists (tracked in
+# #123). GitHub does not create workflow runs from events triggered by
+# GITHUB_TOKEN, so an auto-merge enabled with it lands a commit on main that
+# triggers nothing downstream, including release.yml, whose on:push trigger
+# publishes the `latest` bundle. A Dependabot bump to a runtime dependency
+# therefore merges without a new release until Release is run by hand. An App
+# is a distinct identity, so merges it enables do trigger on:push workflows.
+#
+# No approve step. GITHUB_TOKEN cannot approve a PR unless the org allows
+# Actions to approve pull requests, and no ruleset here requires approving
+# reviews. The App token and the approve step come back together once the
+# bje auto-merge App exists.
+
 on: pull_request_target
+
+# contents:read by default. Only the auto-merge job below gets write access,
+# because GITHUB_TOKEN is the token that enables auto-merge. Nothing here
+# checks out or executes PR code.
+permissions:
+  contents: read
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    # Gate on the PR's AUTHOR, not github.actor. `actor` is whoever triggered
+    # this event, so any human push to a Dependabot branch (fixing a lockfile
+    # conflict, say) makes it the pusher and skips this job. The PR then
+    # silently drops out of auto-merge management, with no error to notice.
+    # `pull_request.user.login` is a stable property of the PR and cannot be
+    # forged, so it is both the correct check and no weaker as a guard.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    # `gh pr merge --auto` with GITHUB_TOKEN needs both scopes: pull-requests
+    # to enable auto-merge on the PR, contents to perform the merge.
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - run: gh pr merge --auto --squash "$PR_URL"
+      - name: Enable auto-merge
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"
