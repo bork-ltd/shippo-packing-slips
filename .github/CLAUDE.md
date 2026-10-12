@@ -14,7 +14,7 @@
 
 **integration-tests.yml** — Runs `pnpm test:integration` (Vitest) on PRs targeting `main`, on a weekly Monday cron, and on manual dispatch. Calls the real Shippo test-mode API via `SHIPPO_TEST_API_TOKEN` secret. Uses `github.ref` in the concurrency group (rather than `pull_request.number`) because the workflow has three triggers and `pull_request.number` is empty for schedule/dispatch runs.
 
-**dependabot-auto-merge.yml** runs on `pull_request_target` and enables `gh pr merge --auto --squash` on PRs authored by `dependabot[bot]` (gated on `pull_request.user.login`, not `github.actor`, so a human push to the branch keeps the PR on auto-merge). The "Require CI" repository ruleset on `main` holds the merge until `biome`, `typecheck`, `unit-tests` and `integration-tests` pass; those names are job names, so renaming a job means updating the ruleset. It merges with `GITHUB_TOKEN`, so the merge does not trigger Release; the bje auto-merge App token and an approve step replace it later (#123).
+**dependabot-auto-merge.yml** runs on `pull_request_target` and enables `gh pr merge --auto --squash` on PRs authored by `dependabot[bot]` (gated on `pull_request.user.login`, not `github.actor`, so a human push to the branch keeps the PR on auto-merge). The "Require CI" repository ruleset on `main` holds the merge until `biome`, `typecheck`, `unit-tests` and `integration-tests` pass; those names are job names, so renaming a job means updating the ruleset. It generates a `bje-merge` App token (`BJE_MERGE_APP_CLIENT_ID`, `BJE_MERGE_APP_PK` org secrets), approves once, and enables auto-merge with that token, so the merge triggers Release.
 
 ## Composite Actions
 
