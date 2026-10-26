@@ -173,8 +173,8 @@ importers:
         specifier: 0.20.2
         version: 0.20.2
       shippo:
-        specifier: 2.18.0
-        version: 2.18.0
+        specifier: 2.19.0
+        version: 2.19.0
     devDependencies:
       '@biomejs/biome':
         specifier: 2.5.15
@@ -602,6 +602,9 @@ packages:
     resolution: {integrity: sha512-3Pe/CF1Nn94hyhIYpjtiLhdCoEoz0DqQ+988E9gmeEdQZlojxnOb74wctFyuwWQHzqyf9X7C7MG8juUpqBJT8w==}
     engines: {node: '>=0.8'}
 
+  decimal.js@10.6.0:
+    resolution: {integrity: sha512-YpgQiITW3JXGntzdUmyUR1V812Hn8T1YVXhCu+wO3OpS4eU9l4YdD3qjyiKdV6mvV29zapkMeD390UVEf2lkUg==}
+
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -829,8 +832,8 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
-  shippo@2.18.0:
-    resolution: {integrity: sha512-cTSwKlH8IFrtuaH3X9iOPy+kG32KVegKkDmj+ICrkl+rpUPeKz4MKdSNUAQnxoP66ezIfj7Tnfv2+3hluUxh8g==}
+  shippo@2.19.0:
+    resolution: {integrity: sha512-ZPlrrYDy5/2fTRGNbqcokOSHL+wQc6dXn1120PZKT3pikJytSg9zQsayydNAHvxk/wWBfJ84tj2kxB3Sgj+FOA==}
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
@@ -1223,6 +1226,8 @@ snapshots:
 
   clone@2.1.2: {}
 
+  decimal.js@10.6.0: {}
+
   detect-libc@2.1.2: {}
 
   dfa@1.2.0: {}
@@ -1425,8 +1430,9 @@ snapshots:
       '@rolldown/binding-win32-arm64-msvc': 1.2.13
       '@rolldown/binding-win32-x64-msvc': 1.2.13
 
-  shippo@2.18.0:
+  shippo@2.19.0:
     dependencies:
+      decimal.js: 10.6.0
       zod: 4.6.5
 
   siginfo@2.0.0: {}
